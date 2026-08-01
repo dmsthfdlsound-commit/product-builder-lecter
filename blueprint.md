@@ -1,20 +1,31 @@
-
-# Lotto Number Generator
+# Lotto Number Generator (로또 번호 생성기)
 
 ## Overview
 
-A simple web application to generate random lottery numbers.
+배포·수익화가 가능한 수준의 한국형 로또 6/45 번호 생성 웹앱. 프레임워크 없이 HTML/CSS/JS로 구현.
 
-## Features
+## Implemented Features
 
-*   Generate 6 unique random numbers between 1 and 45.
-*   Display the generated numbers in a user-friendly interface.
-*   Modern and visually appealing design.
+### v1 (초기 버전)
+- 1~45 중 6개 무작위 생성, 버튼 클릭 시 표시.
+
+### v2 (현재 버전)
+- **다중 게임 생성**: 1~5게임 동시 생성 (A~E 라벨).
+- **생성 모드**: 완전 랜덤 / 홀짝·구간 균형 모드.
+- **고정수·제외수**: 쉼표 구분 입력, 유효성 검사와 한국어 오류 메시지.
+- **번호 저장**: localStorage에 최대 50개 저장, 개별/전체 삭제.
+- **복사·공유**: 클립보드 복사, Web Share API(미지원 브라우저는 복사로 폴백).
+- **디자인**: 다크 프리미엄 테마, 동행복권 공식 볼 색상(노랑/파랑/빨강/회색/초록), 등장 애니메이션, 토스트 알림, 모바일 반응형.
+- **수익화 준비**: 상단/하단 광고 슬롯(`#ad-top`, `#ad-bottom`), SEO/OG 메타태그.
+- **접근성**: aria-live 결과 영역, role 지정, 키보드 조작 가능한 컨트롤.
+- **법적 고지**: 당첨 보장 불가 및 확률 고지 푸터.
+
+## Style & Design
+
+- 컬러: 다크 배경(#101418) + 골드 액센트(oklch), 볼 색상은 공식 로또 색 체계.
+- 타이포: Pretendard/Apple SD Gothic Neo 시스템 폰트 스택.
+- 컴포넌트: 세그먼트 버튼, 카드 레이아웃, 다층 그림자, pop 애니메이션.
 
 ## Current Task
 
-*   **Objective:** Create the initial version of the Lotto Number Generator.
-*   **Steps:**
-    1.  **`index.html`**: Set up the basic HTML structure with a title, a button to generate numbers, and a container to display the results.
-    2.  **`style.css`**: Apply styles to create a visually appealing layout and components.
-    3.  **`main.js`**: Implement the JavaScript logic to handle button clicks, generate the random numbers, and update the UI.
+- v2 완료. 다음 단계는 `LAUNCH_PLAN.md`의 7일 런칭 플랜 실행 (배포 → 광고 승인 → SEO → 트래픽).
