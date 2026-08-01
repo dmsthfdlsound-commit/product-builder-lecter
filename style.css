@@ -1,57 +1,461 @@
-body {
-    font-family: sans-serif;
-    display: flex;
-    justify-content: center;
-    align-items: center;
-    min-height: 100vh;
-    background-color: #f0f0f0;
+/* ==========================================================
+   클릭 견적서 — 견적서 / 거래명세서 / 청구서
+   화면에서는 편집기, 인쇄하면 A4 정식 문서가 됩니다.
+   ========================================================== */
+
+:root {
+    --ink:        #16181d;
+    --ink-soft:   #5b6270;
+    --line:       #2b2f38;
+    --line-soft:  #c9cdd6;
+    --accent:     #1f4fd8;
+    --accent-dk:  #1a41b0;
+    --bg:         #eef0f4;
+    --head-bg:    #f3f5f9;
+    --paper:      #ffffff;
+    --danger:     #c0392b;
+
+    --paper-w:    210mm;
+    --paper-pad:  14mm;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
     margin: 0;
+    padding: 0;
+    background: var(--bg);
+    color: var(--ink);
+    font-family: "Pretendard", "Apple SD Gothic Neo", "Malgun Gothic", "맑은 고딕",
+                 system-ui, -apple-system, sans-serif;
+    font-size: 15px;
+    line-height: 1.5;
+    -webkit-text-size-adjust: 100%;
 }
 
-.container {
-    text-align: center;
-    background-color: white;
-    padding: 2rem;
-    border-radius: 10px;
-    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+/* ── 툴바 ────────────────────────────────────────────── */
+
+.toolbar {
+    position: sticky;
+    top: 0;
+    z-index: 50;
+    background: #fff;
+    border-bottom: 1px solid var(--line-soft);
+    box-shadow: 0 1px 8px rgba(0, 0, 0, .06);
 }
 
-h1 {
-    color: #333;
-}
-
-#generate-btn {
-    background-color: #4CAF50;
-    color: white;
-    padding: 1rem 2rem;
-    border: none;
-    border-radius: 5px;
-    cursor: pointer;
-    font-size: 1rem;
-    margin-bottom: 1rem;
-    transition: background-color 0.3s;
-}
-
-#generate-btn:hover {
-    background-color: #45a049;
-}
-
-#numbers-container {
+.toolbar-inner {
     display: flex;
-    justify-content: center;
-    gap: 1rem;
-    flex-wrap: wrap;
-}
-
-.number {
-    width: 50px;
-    height: 50px;
-    background-color: #eee;
-    border-radius: 50%;
-    display: flex;
-    justify-content: center;
     align-items: center;
-    font-size: 1.5rem;
-    font-weight: bold;
-    color: #333;
+    gap: 16px;
+    flex-wrap: wrap;
+    max-width: 1180px;
+    margin: 0 auto;
+    padding: 10px 16px;
+}
+
+.brand { display: flex; align-items: center; gap: 7px; font-weight: 700; letter-spacing: -.02em; }
+.brand-mark { font-size: 18px; }
+.brand-name { font-size: 16px; }
+
+.doctype { display: flex; background: var(--bg); border-radius: 8px; padding: 3px; }
+
+.doctype-btn {
+    border: 0;
+    background: none;
+    padding: 7px 14px;
+    border-radius: 6px;
+    font: inherit;
+    font-size: 14px;
+    color: var(--ink-soft);
+    cursor: pointer;
+    transition: background .15s, color .15s;
+}
+.doctype-btn:hover { color: var(--ink); }
+.doctype-btn.is-active {
+    background: #fff;
+    color: var(--accent);
+    font-weight: 700;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, .12);
+}
+
+.toolbar-actions { display: flex; gap: 6px; flex-wrap: wrap; margin-left: auto; }
+
+.btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    border: 1px solid var(--line-soft);
+    background: #fff;
+    color: var(--ink);
+    padding: 8px 13px;
+    border-radius: 7px;
+    font: inherit;
+    font-size: 14px;
+    cursor: pointer;
+    white-space: nowrap;
+    transition: background .15s, border-color .15s, color .15s;
+}
+.btn:hover  { background: var(--head-bg); border-color: #a9afbc; }
+.btn:active { transform: translateY(1px); }
+.btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+.btn-primary {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: #fff;
+    font-weight: 600;
+}
+.btn-primary:hover { background: var(--accent-dk); border-color: var(--accent-dk); }
+
+.btn-danger:hover { color: var(--danger); border-color: var(--danger); background: #fdf2f1; }
+.btn-sm { padding: 5px 10px; font-size: 13px; }
+
+.toolbar-note {
+    max-width: 1180px;
+    margin: 0 auto;
+    padding: 0 16px 9px;
+    font-size: 12.5px;
+    color: var(--ink-soft);
+}
+
+/* ── 용지 ────────────────────────────────────────────── */
+
+.stage { padding: 26px 12px 70px; }
+
+.paper {
+    width: var(--paper-w);
+    min-height: 297mm;
+    margin: 0 auto;
+    padding: var(--paper-pad);
+    background: var(--paper);
+    box-shadow: 0 6px 30px rgba(0, 0, 0, .14);
+    display: flex;
+    flex-direction: column;
+}
+
+/* 문서 안의 입력칸: 화면에서는 옅은 밑줄, 인쇄하면 그냥 글자 */
+.paper input,
+.paper textarea {
+    font: inherit;
+    color: inherit;
+    width: 100%;
+    border: 0;
+    border-bottom: 1px dashed transparent;
+    background: transparent;
+    padding: 2px 3px;
+    border-radius: 2px;
+    transition: background .12s, border-color .12s;
+}
+.paper input:hover,
+.paper textarea:hover { border-bottom-color: var(--line-soft); }
+.paper input:focus,
+.paper textarea:focus {
+    outline: 0;
+    background: #eaf0ff;
+    border-bottom-color: var(--accent);
+}
+.paper input::placeholder,
+.paper textarea::placeholder { color: #b3b9c5; }
+
+.print-only { display: none; }
+
+/* ── 문서 머리 ──────────────────────────────────────── */
+
+.doc-head {
+    display: grid;
+    grid-template-columns: 1fr auto 1fr;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 10mm;
+}
+
+.logo-slot { display: flex; align-items: center; min-height: 16mm; }
+.logo-slot img { max-height: 16mm; max-width: 55mm; object-fit: contain; }
+.logo-hint { font-size: 12px; color: #c3c8d2; }
+.logo-slot img:not([hidden]) + .logo-hint { display: none; }
+
+.doc-title {
+    margin: 0;
+    font-size: 30px;
+    font-weight: 800;
+    letter-spacing: .28em;
+    text-indent: .28em;
+    white-space: nowrap;
+    border-bottom: 3px double var(--line);
+    padding-bottom: 3px;
+}
+
+.doc-meta { justify-self: end; border-collapse: collapse; font-size: 13px; }
+.doc-meta th, .doc-meta td { border: 1px solid var(--line-soft); padding: 3px 7px; }
+.doc-meta th { background: var(--head-bg); font-weight: 600; white-space: nowrap; }
+.doc-meta td { min-width: 34mm; }
+
+/* ── 거래 당사자 ────────────────────────────────────── */
+
+.parties {
+    display: grid;
+    grid-template-columns: 1fr 1.05fr;
+    gap: 8mm;
+    align-items: start;
+    margin-bottom: 7mm;
+}
+
+.client-line { display: flex; align-items: baseline; gap: 6px; margin-bottom: 8px; }
+.client-name { font-size: 20px; font-weight: 700; }
+.honorific { font-size: 16px; white-space: nowrap; }
+
+.field { display: flex; align-items: center; gap: 8px; font-size: 13.5px; margin-bottom: 2px; }
+.field > span { color: var(--ink-soft); white-space: nowrap; letter-spacing: .04em; }
+
+.lead { margin: 12px 0 0; font-size: 14.5px; }
+
+.supplier-table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+.supplier-table th,
+.supplier-table td { border: 1px solid var(--line); padding: 3px 6px; }
+.supplier-table th {
+    background: var(--head-bg);
+    font-weight: 600;
+    white-space: nowrap;
+    width: 1%;
+    text-align: center;
+}
+.supplier-table .vertical { width: 7mm; line-height: 1.25; letter-spacing: 0; }
+
+.stamp-cell { position: relative; }
+.stamp {
+    position: absolute;
+    right: 2px;
+    top: 50%;
+    transform: translateY(-50%);
+    height: 13mm;
+    width: 13mm;
+    object-fit: contain;
+    opacity: .92;
+    pointer-events: none;
+}
+
+/* ── 합계금액 한 줄 ─────────────────────────────────── */
+
+.grand-line {
+    display: flex;
+    align-items: baseline;
+    gap: 12px;
+    border: 1.5px solid var(--line);
+    background: var(--head-bg);
+    padding: 8px 12px;
+    margin-bottom: 4mm;
+}
+.grand-label { font-weight: 700; white-space: nowrap; letter-spacing: .1em; }
+.grand-hangul { font-size: 17px; font-weight: 700; flex: 1; word-break: keep-all; }
+.grand-digit { font-size: 14px; color: var(--ink-soft); white-space: nowrap; }
+
+/* ── 품목 표 ────────────────────────────────────────── */
+
+.items { width: 100%; border-collapse: collapse; font-size: 13px; table-layout: fixed; }
+.items th, .items td { border: 1px solid var(--line); padding: 0; height: 9mm; }
+.items thead th {
+    background: var(--head-bg);
+    padding: 5px 4px;
+    font-weight: 600;
+    letter-spacing: .06em;
+    height: auto;
+}
+.items td { padding: 0 4px; vertical-align: middle; }
+
+.c-no     { width: 9mm;  }
+.c-qty    { width: 14mm; }
+.c-price  { width: 26mm; }
+.c-amount { width: 28mm; }
+.c-spec   { width: 30mm; }
+.c-note   { width: 26mm; }
+.c-del    { width: 8mm;  border: 0 !important; background: none !important; }
+
+.items .row-no { text-align: center; color: var(--ink-soft); font-size: 12px; }
+.items .num input, .items .num { text-align: right; }
+.items .cell-amount { text-align: right; font-variant-numeric: tabular-nums; padding-right: 6px; }
+.items tbody tr:hover td { background: #f7f9ff; }
+
+.del-btn {
+    border: 0;
+    background: none;
+    color: #c3c8d2;
+    cursor: pointer;
+    font-size: 16px;
+    line-height: 1;
+    padding: 2px 4px;
+    border-radius: 4px;
+}
+.del-btn:hover { color: var(--danger); background: #fdf2f1; }
+
+.items-actions {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-top: 6px;
+}
+.hint { font-size: 12.5px; color: var(--ink-soft); }
+
+/* ── 합계 / 특기사항 ────────────────────────────────── */
+
+.summary {
+    display: grid;
+    grid-template-columns: 1fr 72mm;
+    gap: 8mm;
+    margin-top: 6mm;
+    align-items: start;
+}
+
+.notes-title { font-size: 13px; font-weight: 700; margin-bottom: 4px; letter-spacing: .06em; }
+.notes textarea {
+    border: 1px solid var(--line-soft);
+    border-bottom: 1px solid var(--line-soft);
+    padding: 7px 9px;
+    font-size: 12.5px;
+    line-height: 1.65;
+    resize: vertical;
+    min-height: 26mm;
+}
+
+.sums { width: 100%; border-collapse: collapse; font-size: 13.5px; }
+.sums th, .sums td { border: 1px solid var(--line); padding: 5px 9px; }
+.sums th { background: var(--head-bg); font-weight: 600; white-space: nowrap; letter-spacing: .06em; }
+.sums td { text-align: right; font-variant-numeric: tabular-nums; }
+.sums .sum-total th, .sums .sum-total td { font-weight: 800; font-size: 15px; background: #e8edfb; }
+.vat-toggle { display: inline-flex; align-items: center; gap: 5px; cursor: pointer; user-select: none; }
+
+/* ── 문서 바닥 ──────────────────────────────────────── */
+
+.doc-foot { margin-top: auto; padding-top: 8mm; text-align: center; }
+.foot-input { text-align: center; font-size: 13px; color: var(--ink-soft); }
+
+/* ── 모달 / 토스트 ──────────────────────────────────── */
+
+.modal {
+    position: fixed;
+    inset: 0;
+    background: rgba(16, 18, 24, .5);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 100;
+    padding: 20px;
+}
+.modal[hidden] { display: none; }
+
+.modal-box {
+    background: #fff;
+    border-radius: 12px;
+    width: min(520px, 100%);
+    max-height: 78vh;
+    display: flex;
+    flex-direction: column;
+    padding: 20px;
+    box-shadow: 0 18px 50px rgba(0, 0, 0, .3);
+}
+.modal-box h2 { margin: 0 0 12px; font-size: 17px; }
+
+.doc-list { list-style: none; margin: 0; padding: 0; overflow-y: auto; flex: 1; }
+.doc-list li {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 6px;
+    border-bottom: 1px solid #eceef2;
+}
+.doc-list .doc-info { flex: 1; min-width: 0; }
+.doc-list .doc-name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.doc-list .doc-sub { font-size: 12.5px; color: var(--ink-soft); }
+.doc-list .empty { color: var(--ink-soft); padding: 22px 6px; text-align: center; border: 0; }
+
+.modal-foot { display: flex; justify-content: flex-end; margin-top: 14px; }
+
+.toast {
+    position: fixed;
+    left: 50%;
+    bottom: 26px;
+    transform: translateX(-50%);
+    background: #1c1f27;
+    color: #fff;
+    padding: 11px 20px;
+    border-radius: 999px;
+    font-size: 14px;
+    z-index: 200;
+    box-shadow: 0 6px 22px rgba(0, 0, 0, .28);
+}
+.toast[hidden] { display: none; }
+
+/* ── 좁은 화면: 용지를 화면 폭에 맞춰 축소 ───────────── */
+
+@media (max-width: 840px) {
+    .stage { padding: 14px 0 60px; overflow-x: auto; }
+    .paper { transform-origin: top center; }
+    .toolbar-actions { margin-left: 0; }
+}
+
+/* ── 인쇄 / PDF ─────────────────────────────────────── */
+
+@page {
+    size: A4;
+    margin: 12mm 10mm;
+}
+
+@media print {
+    html, body { background: #fff; font-size: 12px; }
+
+    .no-print, .toolbar, .modal, .toast { display: none !important; }
+    .print-only { display: inline; }
+
+    .stage { padding: 0; }
+
+    .paper {
+        width: auto;
+        min-height: 0;
+        margin: 0;
+        padding: 0;
+        box-shadow: none;
+    }
+
+    /* 입력칸의 밑줄·배경을 모두 지워 정식 문서처럼 보이게 */
+    .paper input,
+    .paper textarea {
+        border: 0 !important;
+        background: transparent !important;
+        padding: 1px 2px;
+    }
+    .paper input::placeholder,
+    .paper textarea::placeholder { color: transparent !important; }
+    .notes textarea { border: 1px solid var(--line-soft) !important; overflow: hidden; }
+
+    /* 표 배경색이 인쇄에서 날아가지 않도록 */
+    .supplier-table th,
+    .items thead th,
+    .grand-line,
+    .sums th,
+    .sums .sum-total td,
+    .doc-meta th {
+        -webkit-print-color-adjust: exact;
+        print-color-adjust: exact;
+    }
+
+    /* 비워둔 항목은 라벨까지 통째로 감춰 깔끔한 문서로 인쇄 */
+    .field:has(input:placeholder-shown),
+    .client-line:has(input:placeholder-shown),
+    .doc-foot:has(input:placeholder-shown) { display: none; }
+
+    /* "귀하"가 오른쪽 끝으로 밀리지 않도록 상호 칸을 글자 폭에 맞춤.
+       .paper input 의 width:100% 를 이기려면 특이도가 더 높아야 합니다. */
+    .paper .client-name {
+        width: auto;
+        min-width: 0;
+        field-sizing: content;
+    }
+
+    .items { page-break-inside: auto; }
+    .items tr { page-break-inside: avoid; }
+    .items thead { display: table-header-group; }
+    .summary, .grand-line, .parties { page-break-inside: avoid; }
+
+    .doc-title { font-size: 26px; }
+    .doc-foot { margin-top: 12mm; }
 }
