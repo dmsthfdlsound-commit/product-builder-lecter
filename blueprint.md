@@ -1,20 +1,76 @@
+# 클릭 견적서 — Blueprint
 
-# Lotto Number Generator
+## 개요
 
-## Overview
+견적서 · 거래명세서 · 청구서를 브라우저에서 작성하고 A4 PDF로 저장하는 정적 웹앱.
+빌드 도구, 백엔드, 외부 의존성이 모두 없습니다.
 
-A simple web application to generate random lottery numbers.
+## 설계 원칙
 
-## Features
+1. **화면이 곧 문서다** — 별도의 미리보기 패널을 두지 않습니다. A4 용지 위에서 직접
+   편집하고, 인쇄할 때 CSS가 입력칸의 테두리·배경·플레이스홀더를 지워 정식 문서로 만듭니다.
+   미리보기와 결과물이 어긋날 여지가 구조적으로 없습니다.
+2. **데이터를 밖으로 내보내지 않는다** — 거래처명, 단가, 사업자번호는 민감한 영업 정보입니다.
+   네트워크 요청을 한 건도 만들지 않아 유출 경로 자체를 없앴습니다.
+3. **의존성 없음** — 파일 3개. 20년 뒤에 열어도 동작하고, 어떤 정적 호스팅에도 올라갑니다.
 
-*   Generate 6 unique random numbers between 1 and 45.
-*   Display the generated numbers in a user-friendly interface.
-*   Modern and visually appealing design.
+## 구조
 
-## Current Task
+| 파일 | 역할 |
+|---|---|
+| `index.html` | A4 문서 골격. 모든 입력칸은 `data-field` 또는 `data-item` 으로 표시 |
+| `style.css` | 화면 편집기 스타일 + `@media print` 인쇄 규칙 |
+| `main.js` | 계산, 한글 금액 변환, localStorage 저장, JSON 입출력 |
 
-*   **Objective:** Create the initial version of the Lotto Number Generator.
-*   **Steps:**
-    1.  **`index.html`**: Set up the basic HTML structure with a title, a button to generate numbers, and a container to display the results.
-    2.  **`style.css`**: Apply styles to create a visually appealing layout and components.
-    3.  **`main.js`**: Implement the JavaScript logic to handle button clicks, generate the random numbers, and update the UI.
+### 상태 모델
+
+```js
+{
+  version: 1,
+  doctype: '견적서' | '거래명세서' | '청구서',
+  vat: true,                    // 부가세 10% 포함 여부
+  logo:  'data:image/...',      // 선택
+  stamp: 'data:image/...',      // 선택
+  fields: { docNo, docDate, clientName, company, bizNo, ... },
+  items: [{ name, spec, qty, price, note }]
+}
+```
+
+DOM이 곧 상태 저장소입니다. `collectState()` 가 DOM을 읽어 위 객체를 만들고,
+`applyState()` 가 그 반대를 합니다. 저장·불러오기·백업·자동저장이 전부 이 한 쌍을 씁니다.
+
+### 계산
+
+```
+행 금액   = round(수량 × 단가)
+공급가액  = Σ 행 금액
+부가세    = vat ? round(공급가액 × 0.1) : 0
+합계      = 공급가액 + 부가세
+```
+
+한글 금액은 4자리씩 끊어 만·억·조·경 단위를 붙입니다.
+십·백·천 앞의 `일`은 생략하되(15 → 십오), 만 단위가 정확히 1일 때는 남깁니다(10000 → 일만).
+금액 문서의 관례를 따른 것입니다.
+
+### 인쇄
+
+`@page { size: A4 }` 와 `@media print` 규칙이 담당합니다.
+
+- 툴바·행 삭제 버튼·부가세 체크박스는 `.no-print` 로 제거
+- 입력칸의 테두리·배경·플레이스홀더 색을 투명 처리
+- 비워둔 항목은 `:has(input:placeholder-shown)` 으로 라벨까지 숨김
+- 표 머리글 음영이 날아가지 않도록 `print-color-adjust: exact`
+- `document.title` 을 문서명으로 바꿔 PDF 기본 파일명을 지정
+
+## 검증
+
+`docs/sample.png` 는 실제 인쇄 렌더링을 캡처한 것입니다.
+Playwright + Chromium 으로 계산·저장·복원·문서 전환·한글 금액 변환·인쇄 레이아웃을
+26개 항목으로 확인했습니다.
+
+## 앞으로 (구현 안 됨)
+
+- 거래처 주소록 (반복 입력 제거)
+- 품목 프리셋 / 최근 단가 자동완성
+- 견적서 → 거래명세서 → 청구서 이어 만들기
+- 다중 통화, 부가세율 조정 (영세율·면세)
