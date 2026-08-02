@@ -1,0 +1,221 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>셀러 마진 계산기 — 수수료·택배비·부가세까지 넣은 진짜 순이익</title>
+    <meta name="description" content="스마트스토어·쿠팡 셀러를 위한 순이익 계산기. 판매수수료, 택배비, 광고비, 반품률, 부가세를 모두 반영해 건당 실제 남는 돈과 손익분기 판매가를 계산합니다.">
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<header class="topbar">
+    <div class="wrap topbar-inner">
+        <div class="brand"><span class="brand-mark">📦</span><span>셀러 마진 계산기</span></div>
+        <p class="tagline">수수료 · 택배비 · 광고비 · 반품 · 부가세까지 넣은 <strong>진짜 순이익</strong></p>
+    </div>
+</header>
+
+<main class="wrap layout">
+
+    <!-- ── 입력 ─────────────────────────────────────── -->
+    <section class="panel inputs">
+
+        <fieldset class="group">
+            <legend>판매 정보</legend>
+
+            <label class="field">
+                <span class="label">판매 채널</span>
+                <select id="channel">
+                    <option value="5.85">스마트스토어</option>
+                    <option value="10.9">쿠팡 (마켓플레이스)</option>
+                    <option value="13">11번가</option>
+                    <option value="12">G마켓 · 옥션</option>
+                    <option value="3.4">자체몰 (PG 수수료만)</option>
+                    <option value="custom">직접 입력</option>
+                </select>
+            </label>
+
+            <label class="field">
+                <span class="label">판매 수수료율</span>
+                <span class="input-unit">
+                    <input type="text" id="feeRate" inputmode="decimal" value="5.85">
+                    <em>%</em>
+                </span>
+            </label>
+            <p class="note">위 기본값은 <strong>참고용 추정치</strong>입니다. 카테고리·계약·결제수단에 따라 다르니 정산내역서의 실제 요율을 넣으세요.</p>
+
+            <label class="field">
+                <span class="label">판매가</span>
+                <span class="input-unit">
+                    <input type="text" id="price" inputmode="numeric" value="19,900">
+                    <em>원</em>
+                </span>
+            </label>
+            <p class="note">소비자가 결제하는 금액(부가세 포함)을 넣으세요.</p>
+
+            <label class="field">
+                <span class="label">월 판매량</span>
+                <span class="input-unit">
+                    <input type="text" id="volume" inputmode="numeric" value="100">
+                    <em>개</em>
+                </span>
+            </label>
+        </fieldset>
+
+        <fieldset class="group">
+            <legend>비용</legend>
+
+            <label class="field">
+                <span class="label">매입원가</span>
+                <span class="input-unit">
+                    <input type="text" id="cost" inputmode="numeric" value="7,000">
+                    <em>원</em>
+                </span>
+            </label>
+
+            <label class="field">
+                <span class="label">택배비</span>
+                <span class="input-unit">
+                    <input type="text" id="shipping" inputmode="numeric" value="3,000">
+                    <em>원</em>
+                </span>
+            </label>
+            <p class="note">셀러가 부담하는 금액만. 구매자가 배송비를 따로 내면 0으로 두세요.</p>
+
+            <label class="field">
+                <span class="label">포장·부자재</span>
+                <span class="input-unit">
+                    <input type="text" id="packing" inputmode="numeric" value="300">
+                    <em>원</em>
+                </span>
+            </label>
+
+            <label class="field">
+                <span class="label">광고비</span>
+                <span class="input-unit">
+                    <input type="text" id="adRate" inputmode="decimal" value="5">
+                    <em>%</em>
+                </span>
+            </label>
+            <p class="note">매출 대비 광고비 비율. ROAS 500%면 20%입니다.</p>
+
+            <label class="field">
+                <span class="label">기타 비용</span>
+                <span class="input-unit">
+                    <input type="text" id="etc" inputmode="numeric" value="0">
+                    <em>원</em>
+                </span>
+            </label>
+        </fieldset>
+
+        <fieldset class="group">
+            <legend>조건</legend>
+
+            <label class="field">
+                <span class="label">과세 유형</span>
+                <select id="taxType">
+                    <option value="general">일반과세자 (매입세액 공제)</option>
+                    <option value="simple">간이과세자 · 면세 (공제 없음)</option>
+                </select>
+            </label>
+
+            <label class="field">
+                <span class="label">반품률</span>
+                <span class="input-unit">
+                    <input type="text" id="returnRate" inputmode="decimal" value="3">
+                    <em>%</em>
+                </span>
+            </label>
+            <p class="note">반품 1건당 왕복 택배비와 재포장비를 손실로 잡습니다. 상품은 재판매 가능하다고 가정합니다.</p>
+
+            <label class="field">
+                <span class="label">월 고정비</span>
+                <span class="input-unit">
+                    <input type="text" id="fixedCost" inputmode="numeric" value="0">
+                    <em>원</em>
+                </span>
+            </label>
+            <p class="note">임대료, 창고비, 솔루션 구독료 등 판매량과 무관한 월 비용.</p>
+
+            <label class="field">
+                <span class="label">목표 마진율</span>
+                <span class="input-unit">
+                    <input type="text" id="targetMargin" inputmode="decimal" value="20">
+                    <em>%</em>
+                </span>
+            </label>
+        </fieldset>
+
+        <button type="button" class="btn-reset" id="btn-reset">기본값으로 되돌리기</button>
+    </section>
+
+    <!-- ── 결과 ─────────────────────────────────────── -->
+    <section class="panel results">
+
+        <div class="headline" id="headline">
+            <div class="headline-label">건당 순이익</div>
+            <div class="headline-value" id="netProfit">0원</div>
+            <div class="headline-sub">마진율 <strong id="marginRate">0%</strong></div>
+        </div>
+
+        <div class="verdict" id="verdict"></div>
+
+        <div class="block">
+            <h2 id="bar-title">판매가 19,900원은 이렇게 쪼개집니다</h2>
+            <div class="bar" id="bar" role="img" aria-label="비용 구성 막대그래프"></div>
+            <ul class="legend" id="legend"></ul>
+        </div>
+
+        <div class="block">
+            <h2>기준 판매가</h2>
+            <table class="kv">
+                <tr>
+                    <th>손익분기 판매가</th>
+                    <td id="bepPrice">-</td>
+                </tr>
+                <tr>
+                    <th>목표 마진율 달성가</th>
+                    <td id="targetPrice">-</td>
+                </tr>
+                <tr>
+                    <th>최저 마진 확보 원가</th>
+                    <td id="maxCost">-</td>
+                </tr>
+            </table>
+            <p class="note" id="bepNote"></p>
+        </div>
+
+        <div class="block">
+            <h2>월 손익</h2>
+            <table class="kv">
+                <tr><th>월 매출</th><td id="mRevenue">-</td></tr>
+                <tr><th>월 순이익 (고정비 차감 전)</th><td id="mGross">-</td></tr>
+                <tr><th>월 고정비</th><td id="mFixed">-</td></tr>
+                <tr class="strong"><th>월 최종 순이익</th><td id="mNet">-</td></tr>
+                <tr><th>손익분기 판매량</th><td id="bepVolume">-</td></tr>
+            </table>
+        </div>
+
+        <details class="block assumptions">
+            <summary>계산 가정 — 클릭해서 확인하세요</summary>
+            <ul>
+                <li><strong>판매가는 부가세 포함</strong>가로 봅니다. 매출세액 = 판매가 ÷ 11.</li>
+                <li><strong>일반과세자</strong>일 때 모든 비용에 대해 세금계산서를 받아 매입세액을 공제한다고 가정합니다.
+                    간이영수증만 있거나 면세 품목이면 실제 세부담은 더 큽니다.</li>
+                <li><strong>반품</strong>은 상품을 되팔 수 있다고 보고 왕복 택배비 + 재포장비만 손실로 잡습니다.
+                    개봉 시 폐기되는 상품이라면 매입원가도 손실에 더해야 합니다.</li>
+                <li><strong>광고비</strong>는 판매가 대비 비율로 계산합니다.</li>
+                <li>종합소득세·법인세, 카드 매출 부가세 대리납부, 재고 감모, 반품 시 수수료 환급 여부는
+                    반영하지 않았습니다. 실제 세후 이익은 이보다 낮습니다.</li>
+            </ul>
+        </details>
+
+        <p class="privacy">입력값은 이 브라우저에만 저장됩니다. 서버로 전송되지 않습니다.</p>
+    </section>
+
+</main>
+
+<script src="main.js"></script>
+</body>
+</html>
