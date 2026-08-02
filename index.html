@@ -1,17 +1,93 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="ko">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Lotto Number Generator</title>
+    <title>로또 번호 생성기 - 무료 로또 6/45 번호 추첨기</title>
+    <meta name="description" content="무료 로또 번호 생성기. 고정수·제외수 설정, 홀짝 균형 모드, 최대 5게임 동시 생성, 번호 저장과 공유까지. 동행복권 로또 6/45 스타일의 깔끔한 무료 추첨기입니다.">
+    <meta name="keywords" content="로또 번호 생성기, 로또 번호 추천, 로또 6/45, 무료 로또 번호, 로또 자동 생성">
+    <meta property="og:type" content="website">
+    <meta property="og:title" content="로또 번호 생성기 - 무료 로또 6/45 번호 추첨기">
+    <meta property="og:description" content="고정수·제외수 설정, 균형 모드, 최대 5게임 동시 생성. 광고 없는 깔끔한 무료 로또 번호 생성기.">
+    <meta property="og:locale" content="ko_KR">
+    <meta name="theme-color" content="#101418">
     <link rel="stylesheet" href="style.css">
 </head>
 <body>
-    <div class="container">
-        <h1>Lotto Number Generator</h1>
-        <button id="generate-btn">Generate Numbers</button>
-        <div id="numbers-container"></div>
+    <div class="app">
+        <header class="header">
+            <h1 class="logo"><span class="logo-ball">6</span>로또 번호 생성기</h1>
+            <p class="tagline">이번 주 행운의 번호, 원하는 조건으로 뽑아보세요</p>
+        </header>
+
+        <!-- 광고 슬롯 (상단): 애드센스/애드핏 승인 후 이 주석 자리에 광고 코드를 붙여넣으세요 -->
+        <div class="ad-slot" id="ad-top" aria-hidden="true"></div>
+
+        <main class="card">
+            <section class="controls" aria-label="생성 옵션">
+                <div class="control-row">
+                    <label class="control-label" for="game-count">게임 수</label>
+                    <div class="segmented" id="game-count" role="group" aria-label="게임 수 선택">
+                        <button type="button" class="seg-btn active" data-count="1">1</button>
+                        <button type="button" class="seg-btn" data-count="2">2</button>
+                        <button type="button" class="seg-btn" data-count="3">3</button>
+                        <button type="button" class="seg-btn" data-count="4">4</button>
+                        <button type="button" class="seg-btn" data-count="5">5</button>
+                    </div>
+                </div>
+
+                <div class="control-row">
+                    <label class="control-label" for="mode">생성 모드</label>
+                    <div class="segmented" role="group" aria-label="생성 모드 선택">
+                        <button type="button" class="seg-btn mode-btn active" data-mode="random" id="mode">완전 랜덤</button>
+                        <button type="button" class="seg-btn mode-btn" data-mode="balanced">홀짝·구간 균형</button>
+                    </div>
+                </div>
+
+                <div class="control-row inputs">
+                    <div class="input-group">
+                        <label class="control-label" for="fixed-input">고정수 <small>(쉼표로 구분, 최대 5개)</small></label>
+                        <input type="text" id="fixed-input" inputmode="numeric" placeholder="예: 7, 21" autocomplete="off">
+                    </div>
+                    <div class="input-group">
+                        <label class="control-label" for="excluded-input">제외수 <small>(쉼표로 구분)</small></label>
+                        <input type="text" id="excluded-input" inputmode="numeric" placeholder="예: 4, 13, 44" autocomplete="off">
+                    </div>
+                </div>
+
+                <p class="error-msg" id="error-msg" role="alert" hidden></p>
+
+                <button id="generate-btn" class="generate-btn">번호 생성하기</button>
+            </section>
+
+            <section id="results" class="results" aria-label="생성된 번호" aria-live="polite"></section>
+
+            <div class="result-actions" id="result-actions" hidden>
+                <button type="button" class="action-btn" id="save-btn">저장</button>
+                <button type="button" class="action-btn" id="copy-btn">복사</button>
+                <button type="button" class="action-btn" id="share-btn">공유</button>
+            </div>
+        </main>
+
+        <section class="card saved-card" id="saved-card" hidden>
+            <div class="saved-header">
+                <h2>저장한 번호</h2>
+                <button type="button" class="text-btn" id="clear-saved-btn">전체 삭제</button>
+            </div>
+            <ul class="saved-list" id="saved-list"></ul>
+        </section>
+
+        <!-- 광고 슬롯 (하단): 애드센스/애드핏 승인 후 이 주석 자리에 광고 코드를 붙여넣으세요 -->
+        <div class="ad-slot" id="ad-bottom" aria-hidden="true"></div>
+
+        <footer class="footer">
+            <p>본 서비스는 무작위 번호 생성 도구이며, 당첨을 보장하거나 확률을 높여주지 않습니다.</p>
+            <p>로또 6/45의 모든 조합은 동일한 확률(1/8,145,060)을 가집니다. 복권 구매는 동행복권 공식 판매처를 이용하세요.</p>
+            <p><a href="guide.html">로또 확률 가이드</a> · <a href="privacy.html">개인정보처리방침</a></p>
+        </footer>
     </div>
+
+    <div class="toast" id="toast" role="status"></div>
     <script src="main.js"></script>
 </body>
 </html>

@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://dmsthfdlsound-commit.github.io/product-builder-lecter/sitemap.xml
