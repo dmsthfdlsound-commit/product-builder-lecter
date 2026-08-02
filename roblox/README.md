@@ -15,6 +15,10 @@
 |---|---|
 | [`trends-2026.md`](./trends-2026.md) | 2026년 로블록스 유행 장르 분석 — 무엇이 뜨고, **왜** 뜨는지(도파민 루프 분해), 1인 개발자 관점의 장르별 현실성 평가 |
 | [`dopamine-driven-plan.md`](./dopamine-driven-plan.md) | 도파민 드리븐 디벨로핑(DDD) 7원칙, 게임 컨셉 3안 비교와 추천안, 14일 세션별 로드맵, 첫 30분 퀵스타트 코드, 수익화·라이브옵스 체크리스트 |
+| [`top20-complaints-opportunity.md`](./top20-complaints-opportunity.md) | 톱20 게임별 반복 유저 불만 리서치, 12개 공통 불만 테마, 불만을 차별화로 뒤집는 설계 결정 |
+| [`dopamine-hooks.md`](./dopamine-hooks.md) | "안달 엔진" 10종 — 기대 도파민 기반 갈망 훅 카탈로그 + 우선순위/가드레일 |
+| [`plus1-hypercasual-analysis.md`](./plus1-hypercasual-analysis.md) | +1 Speed Keyboard Escape 해부 — 게임 형태·과금 사다리·매출 추정, 8요소 공식 템플릿, 7일 스프린트 |
+| [**`game/`**](./game/) | 🫧 **+1 Pop! 뽁뽁이 탈출 — 실제 플레이 가능한 v0.1 코드+place 파일** (Studio에서 바로 열림) |
 
 ## 지금 바로 시작하려면
 
