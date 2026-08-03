@@ -1,5 +1,5 @@
 --------------------------------------------------------------------
--- +1 Pop! HUD — 화면 중앙 상단 Speed 카운터 + 전광판 배너
+-- +1 Pop! HUD — Speed 카운터 + 전광판 배너 + 트레일 상점 (v0.2)
 -- StarterPlayerScripts (LocalScript)
 --------------------------------------------------------------------
 
@@ -128,4 +128,171 @@ if announce then
 			end
 		end)
 	end)
+end
+
+--------------------------------------------------------------------
+-- 트레일 상점 UI (v0.2) — ⭐ Wins로 구매, 치장 전용
+--------------------------------------------------------------------
+local function roundify(inst, px)
+	local corner = Instance.new("UICorner")
+	corner.CornerRadius = UDim.new(0, px or 10)
+	corner.Parent = inst
+end
+
+local shopRF = ReplicatedStorage:WaitForChild("TrailShop", 10)
+if shopRF then
+	local toggle = Instance.new("TextButton")
+	toggle.AnchorPoint = Vector2.new(1, 0)
+	toggle.Position = UDim2.new(1, -12, 0, 12)
+	toggle.Size = UDim2.fromOffset(110, 42)
+	toggle.Font = Enum.Font.FredokaOne
+	toggle.TextScaled = true
+	toggle.Text = "🛒 상점"
+	toggle.TextColor3 = Color3.new(1, 1, 1)
+	toggle.BackgroundColor3 = Color3.fromRGB(85, 125, 225)
+	toggle.Parent = gui
+	roundify(toggle)
+
+	local panel = Instance.new("Frame")
+	panel.AnchorPoint = Vector2.new(1, 0)
+	panel.Position = UDim2.new(1, -12, 0, 62)
+	panel.Size = UDim2.fromOffset(270, 252)
+	panel.BackgroundColor3 = Color3.fromRGB(25, 25, 45)
+	panel.BackgroundTransparency = 0.12
+	panel.Visible = false
+	panel.Parent = gui
+	roundify(panel, 12)
+
+	local title = Instance.new("TextLabel")
+	title.Size = UDim2.new(1, 0, 0, 32)
+	title.BackgroundTransparency = 1
+	title.Font = Enum.Font.FredokaOne
+	title.TextScaled = true
+	title.Text = "트레일 상점 — ⭐ Wins로 구매"
+	title.TextColor3 = Color3.fromRGB(255, 230, 150)
+	title.Parent = panel
+
+	local list = Instance.new("Frame")
+	list.Position = UDim2.new(0, 8, 0, 38)
+	list.Size = UDim2.new(1, -16, 1, -74)
+	list.BackgroundTransparency = 1
+	list.Parent = panel
+
+	local layout = Instance.new("UIListLayout")
+	layout.Padding = UDim.new(0, 6)
+	layout.SortOrder = Enum.SortOrder.LayoutOrder
+	layout.Parent = list
+
+	local shopMsg = Instance.new("TextLabel")
+	shopMsg.AnchorPoint = Vector2.new(0, 1)
+	shopMsg.Position = UDim2.new(0, 8, 1, -6)
+	shopMsg.Size = UDim2.new(1, -16, 0, 24)
+	shopMsg.BackgroundTransparency = 1
+	shopMsg.Font = Enum.Font.FredokaOne
+	shopMsg.TextScaled = true
+	shopMsg.Text = ""
+	shopMsg.TextColor3 = Color3.fromRGB(200, 255, 210)
+	shopMsg.Parent = panel
+
+	local rows = {} -- id → { action = TextButton, item = 카탈로그 항목 }
+	local refreshShop
+
+	local function invoke(action, id)
+		task.spawn(function()
+			local ok, snapshot = pcall(function()
+				return shopRF:InvokeServer(action, id)
+			end)
+			if ok and type(snapshot) == "table" then
+				refreshShop(snapshot)
+			end
+		end)
+	end
+
+	local function buildRow(order, item)
+		local row = Instance.new("Frame")
+		row.Size = UDim2.new(1, 0, 0, 48)
+		row.BackgroundColor3 = Color3.fromRGB(40, 40, 70)
+		row.LayoutOrder = order
+		row.Parent = list
+		roundify(row, 8)
+
+		local swatch = Instance.new("Frame")
+		swatch.Position = UDim2.new(0, 6, 0.5, -12)
+		swatch.Size = UDim2.fromOffset(24, 24)
+		swatch.BackgroundColor3 = Color3.fromRGB(item.color[1], item.color[2], item.color[3])
+		swatch.Parent = row
+		roundify(swatch, 12)
+
+		local name = Instance.new("TextLabel")
+		name.Position = UDim2.new(0, 36, 0, 0)
+		name.Size = UDim2.new(0.4, 0, 1, 0)
+		name.BackgroundTransparency = 1
+		name.Font = Enum.Font.FredokaOne
+		name.TextScaled = true
+		name.TextXAlignment = Enum.TextXAlignment.Left
+		name.Text = item.name
+		name.TextColor3 = Color3.new(1, 1, 1)
+		name.Parent = row
+
+		local action = Instance.new("TextButton")
+		action.AnchorPoint = Vector2.new(1, 0.5)
+		action.Position = UDim2.new(1, -6, 0.5, 0)
+		action.Size = UDim2.new(0.4, 0, 0, 36)
+		action.Font = Enum.Font.FredokaOne
+		action.TextScaled = true
+		action.TextColor3 = Color3.new(1, 1, 1)
+		action.BackgroundColor3 = Color3.fromRGB(85, 125, 225)
+		action.Parent = row
+		roundify(action, 8)
+
+		action.Activated:Connect(function()
+			local current = rows[item.id].item
+			if not current.owned then
+				invoke("buy", item.id)
+			elseif current.equipped then
+				invoke("equip", "") -- 장착 해제
+			else
+				invoke("equip", item.id)
+			end
+		end)
+
+		rows[item.id] = { action = action, item = item }
+	end
+
+	refreshShop = function(snapshot)
+		for order, item in snapshot.catalog do
+			if not rows[item.id] then
+				buildRow(order, item)
+			end
+			local row = rows[item.id]
+			row.item = item
+			if item.equipped then
+				row.action.Text = "✓ 장착중"
+				row.action.BackgroundColor3 = Color3.fromRGB(70, 190, 110)
+			elseif item.owned then
+				row.action.Text = "장착"
+				row.action.BackgroundColor3 = Color3.fromRGB(85, 125, 225)
+			else
+				row.action.Text = ("구매 %d⭐"):format(item.price)
+				row.action.BackgroundColor3 = Color3.fromRGB(225, 120, 85)
+			end
+		end
+		if snapshot.msg and snapshot.msg ~= "" then
+			shopMsg.Text = snapshot.msg
+			task.delay(3, function()
+				if shopMsg.Text == snapshot.msg then
+					shopMsg.Text = ""
+				end
+			end)
+		end
+	end
+
+	toggle.Activated:Connect(function()
+		panel.Visible = not panel.Visible
+		if panel.Visible then
+			invoke("get")
+		end
+	end)
+
+	invoke("get") -- 접속 시 초기 상태 로드
 end

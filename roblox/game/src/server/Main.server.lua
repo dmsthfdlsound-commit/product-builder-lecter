@@ -1,6 +1,7 @@
 --------------------------------------------------------------------
--- +1 Pop! 뽁뽁이 탈출 (Bubble Wrap Escape) — v0.1
+-- +1 Pop! 뽁뽁이 탈출 (Bubble Wrap Escape) — v0.2
 -- 코어 루프: 뽁뽁이를 밟으면 +1 Speed → 스피드 게이트 통과 → WIN → 리버스
+-- v0.2: Wins로 사는 트레일 상점 (치장 전용 — 남을 이기는 힘은 팔지 않음)
 -- 이 스크립트 하나가 맵 생성부터 저장까지 전부 담당합니다 (ServerScriptService)
 --------------------------------------------------------------------
 
@@ -24,7 +25,25 @@ local CONFIG = {
 	GateReqs = { 50, 150, 300, 500, 800 },
 	RebirthBaseReq = 1000,   -- 리버스 요구치 = Base × (리버스+1)
 	AutosaveInterval = 120,
+	-- 트레일 상점 (Wins 재화, 치장 전용)
+	Trails = {
+		{ id = "bubble",  name = "🫧 비눗방울", price = 3,
+			colors = { {170, 225, 255}, {255, 255, 255} }, lightEmission = 0.2 },
+		{ id = "rainbow", name = "🌈 무지개", price = 10,
+			colors = { {255, 80, 80}, {255, 220, 80}, {90, 220, 120}, {90, 160, 255}, {190, 110, 255} }, lightEmission = 0.4 },
+		{ id = "gold",    name = "⭐ 황금", price = 25,
+			colors = { {255, 220, 90}, {255, 150, 40} }, lightEmission = 1 },
+	},
 }
+
+local function trailDefById(id)
+	for _, def in CONFIG.Trails do
+		if def.id == id then
+			return def
+		end
+	end
+	return nil
+end
 
 local ZONE_COLORS = {
 	Color3.fromRGB(255, 214, 231), -- 딸기
@@ -54,6 +73,9 @@ pcall(function()
 	store = DataStoreService:GetDataStore("Plus1Pop_v1")
 end)
 
+-- 트레일 소유/장착 상태 (서버 권위 — 클라이언트는 요청만)
+local trailState = {} -- [player] = { owned = {id=true}, equipped = "id" or "" }
+
 local function statsOf(player)
 	local s = player:FindFirstChild("leaderstats")
 	if not s then return nil end
@@ -71,7 +93,7 @@ local function applyWalkSpeed(player)
 end
 
 local function loadData(player)
-	local data = { s = 0, w = 0, r = 0 }
+	local data = { s = 0, w = 0, r = 0, t = {}, e = "" }
 	if store then
 		local ok, saved = pcall(function()
 			return store:GetAsync("p_" .. player.UserId)
@@ -80,6 +102,16 @@ local function loadData(player)
 			data.s = tonumber(saved.s) or 0
 			data.w = tonumber(saved.w) or 0
 			data.r = tonumber(saved.r) or 0
+			if type(saved.t) == "table" then
+				for _, id in saved.t do
+					if trailDefById(id) then
+						data.t[id] = true
+					end
+				end
+			end
+			if type(saved.e) == "string" and data.t[saved.e] then
+				data.e = saved.e
+			end
 		end
 	end
 	return data
@@ -89,9 +121,66 @@ local function saveData(player)
 	if not store then return end
 	local speed, wins, rebirths = statsOf(player)
 	if not speed then return end
+	local state = trailState[player]
+	local ownedIds = {}
+	if state then
+		for id in state.owned do
+			table.insert(ownedIds, id)
+		end
+	end
 	pcall(function()
-		store:SetAsync("p_" .. player.UserId, { s = speed.Value, w = wins.Value, r = rebirths.Value })
+		store:SetAsync("p_" .. player.UserId, {
+			s = speed.Value,
+			w = wins.Value,
+			r = rebirths.Value,
+			t = ownedIds,
+			e = state and state.equipped or "",
+		})
 	end)
+end
+
+-- 장착된 트레일을 캐릭터에 적용 (기존 것 제거 후 재생성)
+local function applyEquippedTrail(player)
+	local char = player.Character
+	local root = char and char:FindFirstChild("HumanoidRootPart")
+	if not root then return end
+
+	for _, name in { "Plus1Trail", "Plus1TrailA0", "Plus1TrailA1" } do
+		local old = root:FindFirstChild(name)
+		if old then old:Destroy() end
+	end
+
+	local state = trailState[player]
+	local def = state and trailDefById(state.equipped)
+	if not def then return end
+
+	local a0 = Instance.new("Attachment")
+	a0.Name = "Plus1TrailA0"
+	a0.Position = Vector3.new(0, 1, 0)
+	a0.Parent = root
+
+	local a1 = Instance.new("Attachment")
+	a1.Name = "Plus1TrailA1"
+	a1.Position = Vector3.new(0, -1, 0)
+	a1.Parent = root
+
+	local keypoints = {}
+	local n = #def.colors
+	for i, rgb in def.colors do
+		local t = (n == 1) and 0 or (i - 1) / (n - 1)
+		table.insert(keypoints, ColorSequenceKeypoint.new(t, Color3.fromRGB(rgb[1], rgb[2], rgb[3])))
+	end
+
+	local trail = Instance.new("Trail")
+	trail.Name = "Plus1Trail"
+	trail.Attachment0 = a0
+	trail.Attachment1 = a1
+	trail.Color = ColorSequence.new(keypoints)
+	trail.Transparency = NumberSequence.new(0.15, 1)
+	trail.Lifetime = 0.55
+	trail.FaceCamera = true
+	trail.LightEmission = def.lightEmission or 0.2
+	trail.Parent = root
 end
 
 Players.PlayerAdded:Connect(function(player)
@@ -117,19 +206,26 @@ Players.PlayerAdded:Connect(function(player)
 
 	stats.Parent = player
 
+	trailState[player] = { owned = data.t, equipped = data.e }
+
 	speed.Changed:Connect(function()
 		applyWalkSpeed(player)
 	end)
 	player.CharacterAdded:Connect(function(char)
 		char:WaitForChild("Humanoid")
 		applyWalkSpeed(player)
+		applyEquippedTrail(player)
 	end)
 	if player.Character then
 		applyWalkSpeed(player)
+		applyEquippedTrail(player)
 	end
 end)
 
-Players.PlayerRemoving:Connect(saveData)
+Players.PlayerRemoving:Connect(function(player)
+	saveData(player)
+	trailState[player] = nil
+end)
 
 game:BindToClose(function()
 	for _, player in Players:GetPlayers() do
@@ -145,6 +241,79 @@ task.spawn(function()
 		end
 	end
 end)
+
+--------------------------------------------------------------------
+-- 트레일 상점 (RemoteFunction) — 검증은 전부 서버에서
+--------------------------------------------------------------------
+local shopRF = Instance.new("RemoteFunction")
+shopRF.Name = "TrailShop"
+shopRF.Parent = ReplicatedStorage
+
+local function shopSnapshot(player, ok, msg)
+	local state = trailState[player] or { owned = {}, equipped = "" }
+	local _, wins = statsOf(player)
+	local catalog = {}
+	for _, def in CONFIG.Trails do
+		table.insert(catalog, {
+			id = def.id,
+			name = def.name,
+			price = def.price,
+			color = def.colors[1],
+			owned = state.owned[def.id] == true,
+			equipped = state.equipped == def.id,
+		})
+	end
+	return { ok = ok ~= false, msg = msg or "", wins = wins and wins.Value or 0, catalog = catalog }
+end
+
+shopRF.OnServerInvoke = function(player, action, trailId)
+	local state = trailState[player]
+	local _, wins = statsOf(player)
+	if not (state and wins) then
+		return shopSnapshot(player, false, "로딩 중이에요, 잠시 후 다시!")
+	end
+
+	if action == "get" then
+		return shopSnapshot(player)
+
+	elseif action == "buy" then
+		local def = trailDefById(trailId)
+		if not def then
+			return shopSnapshot(player, false, "없는 트레일이에요")
+		end
+		if state.owned[def.id] then
+			return shopSnapshot(player, false, "이미 보유 중!")
+		end
+		if wins.Value < def.price then
+			return shopSnapshot(player, false, ("Wins가 부족해요 (%d 필요)"):format(def.price))
+		end
+		wins.Value -= def.price
+		state.owned[def.id] = true
+		state.equipped = def.id -- 구매 즉시 장착 (첫 도파민)
+		applyEquippedTrail(player)
+		saveData(player)
+		broadcast(("🛒 %s님이 %s 트레일 획득!"):format(player.Name, def.name))
+		return shopSnapshot(player, true, def.name .. " 구매 & 장착 완료!")
+
+	elseif action == "equip" then
+		if trailId == nil or trailId == "" then
+			state.equipped = ""
+			applyEquippedTrail(player)
+			saveData(player)
+			return shopSnapshot(player, true, "트레일을 해제했어요")
+		end
+		local def = trailDefById(trailId)
+		if not (def and state.owned[def.id]) then
+			return shopSnapshot(player, false, "먼저 구매해야 해요")
+		end
+		state.equipped = def.id
+		applyEquippedTrail(player)
+		saveData(player)
+		return shopSnapshot(player, true, def.name .. " 장착!")
+	end
+
+	return shopSnapshot(player, false, "알 수 없는 요청")
+end
 
 --------------------------------------------------------------------
 -- 유틸
