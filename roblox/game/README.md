@@ -1,4 +1,8 @@
-# 🫧 +1 Pop! 뽁뽁이 탈출 (Bubble Wrap Escape) — v0.2
+# 🫧 +1 Pop! 뽁뽁이 탈출 (Bubble Wrap Escape) — v0.3
+
+> **v0.3 게임 필 패치**: 속도 체감 강화(계수 0.06→0.45, FOV 연출), 뽁 쿨다운 1.5s→0.35s(매 걸음이 뽁),
+> 물방울 '퐁' 사운드(랜덤 피치·저볼륨), 터진 자리에 "+N" 플로터, 눌림(squash) 애니메이션, 양옆 가드레일.
+> 🔊 더 좋은 ASMR 팝 사운드를 원하면: Studio 툴박스에서 "bubble pop" 검색 → `Main.server.lua`의 `popSound` 안 `SoundId` 한 줄만 교체.
 
 > +1 공식([분석 문서](../plus1-hypercasual-analysis.md))의 1호기. 뽁뽁이를 밟으면 +1 Speed, 스피드 게이트를 뚫고 탈출하는 하이퍼캐주얼.
 > **이 폴더는 실제로 돌아가는 완성 코드입니다** — 아래 방법대로 열면 5분 안에 플레이됩니다.

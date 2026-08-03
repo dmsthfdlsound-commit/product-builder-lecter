@@ -80,12 +80,23 @@ local function refresh()
 	subline.Text = ("🏆 %d   ♻️ %d (뽁 ×%d)"):format(wins.Value, rebirths.Value, rebirths.Value + 1)
 end
 
+-- 속도감 연출: Speed가 오를수록 시야각(FOV)이 넓어져 "빨라지는 몸느낌"을 증폭
+local function updateFov(value)
+	local camera = workspace.CurrentCamera
+	if not camera then return end
+	local target = math.clamp(70 + value * 0.055, 70, 95)
+	TweenService:Create(camera, TweenInfo.new(0.35, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
+		FieldOfView = target,
+	}):Play()
+end
+
 local lastSpeed = speed.Value
 
 speed.Changed:Connect(function(newValue)
 	local delta = newValue - lastSpeed
 	lastSpeed = newValue
 	refresh()
+	updateFov(newValue)
 
 	-- 카운터 펄스
 	counter.TextColor3 = delta >= 0 and Color3.fromRGB(190, 255, 210) or Color3.fromRGB(255, 190, 190)
@@ -108,6 +119,7 @@ end)
 wins.Changed:Connect(refresh)
 rebirths.Changed:Connect(refresh)
 refresh()
+updateFov(speed.Value)
 
 -- 서버 전광판 구독
 local announce = ReplicatedStorage:WaitForChild("Announce", 10)

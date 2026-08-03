@@ -15,9 +15,11 @@
         <string name="Name">Main</string>
         <token name="RunContext">0</token>
         <string name="Source"><![CDATA[--------------------------------------------------------------------
--- +1 Pop! 뽁뽁이 탈출 (Bubble Wrap Escape) — v0.2
+-- +1 Pop! 뽁뽁이 탈출 (Bubble Wrap Escape) — v0.3
 -- 코어 루프: 뽁뽁이를 밟으면 +1 Speed → 스피드 게이트 통과 → WIN → 리버스
 -- v0.2: Wins로 사는 트레일 상점 (치장 전용 — 남을 이기는 힘은 팔지 않음)
+-- v0.3: 게임 필 패치 — 속도 체감 7.5배, 뽁 연타감, 물방울 팝 사운드,
+--       월드 "+N" 플로터, 눌림(squash) 애니메이션, FOV 속도감, 가드레일
 -- 이 스크립트 하나가 맵 생성부터 저장까지 전부 담당합니다 (ServerScriptService)
 --------------------------------------------------------------------
 
@@ -31,10 +33,10 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 --------------------------------------------------------------------
 local CONFIG = {
 	BaseWalkSpeed = 16,
-	SpeedToWalk = 0.06,      -- Speed 1당 걷기속도 보너스
-	MaxWalkSpeed = 100,
-	TileCooldown = 1.5,      -- 같은 뽁뽁이 재사용 대기(초, 플레이어별)
-	PopRespawn = 2.5,        -- 터진 뽁뽁이 복구 시간
+	SpeedToWalk = 0.45,      -- Speed 1당 걷기속도 보너스 — "빨라지는 게 몸으로 느껴져야" 한다
+	MaxWalkSpeed = 130,
+	TileCooldown = 0.35,     -- 매 걸음이 뽁이어야 손맛이 난다
+	PopRespawn = 1.2,        -- 터진 뽁뽁이 복구 시간
 	TileSize = 5,
 	FieldWidth = 10,         -- 뽁뽁이 가로 개수
 	ZoneLength = 12,         -- 존당 뽁뽁이 세로 개수
@@ -352,12 +354,40 @@ end
 
 local function popSound(parent)
 	local sound = Instance.new("Sound")
-	sound.SoundId = "rbxasset://sounds/electronicpingshort.wav" -- 내장 사운드라 로딩 실패 없음
-	sound.PlaybackSpeed = 0.9 + math.random() * 0.5
-	sound.Volume = 0.5
+	-- 내장 사운드 중 '뽁'에 가장 가까운 물방울 퐁 소리. 높은 랜덤 피치 = 작고 귀여운 팝
+	-- 더 좋은 ASMR 팝을 원하면: Studio 툴박스에서 "bubble pop" 검색 → 아래 SoundId만 교체
+	sound.SoundId = "rbxasset://sounds/impact_water.mp3"
+	sound.PlaybackSpeed = 1.2 + math.random() * 0.5
+	sound.Volume = 0.25 + math.random() * 0.1
 	sound.Parent = parent
 	sound:Play()
 	task.delay(1, function() sound:Destroy() end)
+end
+
+-- 뽁 터질 때 그 자리에서 떠오르는 "+N" (이 장르의 시그니처 비주얼)
+local function popFloater(bubble, amount)
+	local gui = Instance.new("BillboardGui")
+	gui.Size = UDim2.fromScale(3, 1.5)
+	gui.StudsOffset = Vector3.new(0, 1, 0)
+	gui.AlwaysOnTop = true
+	gui.MaxDistance = 120
+	gui.Parent = bubble
+
+	local label = Instance.new("TextLabel")
+	label.Size = UDim2.fromScale(1, 1)
+	label.BackgroundTransparency = 1
+	label.Font = Enum.Font.FredokaOne
+	label.TextScaled = true
+	label.Text = "+" .. amount
+	label.TextColor3 = Color3.fromRGB(150, 255, 180)
+	label.TextStrokeTransparency = 0.3
+	label.Parent = gui
+
+	TweenService:Create(gui, TweenInfo.new(0.55, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
+		StudsOffset = Vector3.new(0, 3.2, 0),
+	}):Play()
+	TweenService:Create(label, TweenInfo.new(0.55), { TextTransparency = 1, TextStrokeTransparency = 1 }):Play()
+	task.delay(0.6, function() gui:Destroy() end)
 end
 
 local function makeLabel(parent, text, textColor, size)
@@ -390,14 +420,20 @@ local fieldWidthStuds = CONFIG.FieldWidth * TILE
 
 -- 뽁뽁이 한 개
 local function spawnBubble(x, z, zoneColor)
+	-- 눌리기 전(볼록)/눌린 후(납작) 상태를 미리 정의 — 키가 눌리는 촉감의 핵심
+	local upCF = CFrame.new(x, 0.55, z) * CFrame.Angles(0, 0, math.rad(90))
+	local downCF = CFrame.new(x, 0.18, z) * CFrame.Angles(0, 0, math.rad(90))
+	local upSize = Vector3.new(1.1, TILE - 0.9, TILE - 0.9)
+	local downSize = Vector3.new(0.3, TILE - 0.4, TILE - 0.4) -- 아래로 꺼지며 옆으로 퍼짐(squash)
+
 	local bubble = makePart({
 		Name = "Bubble",
 		Shape = Enum.PartType.Cylinder,
 		Material = Enum.Material.SmoothPlastic,
 		Color = Color3.fromRGB(235, 250, 255),
 		Transparency = 0.15,
-		Size = Vector3.new(1.1, TILE - 0.9, TILE - 0.9),
-		CFrame = CFrame.new(x, 0.55, z) * CFrame.Angles(0, 0, math.rad(90)),
+		Size = upSize,
+		CFrame = upCF,
 		CanCollide = false,
 	})
 	bubble.Parent = map
@@ -419,24 +455,28 @@ local function spawnBubble(x, z, zoneColor)
 		if not speed then return end
 
 		-- 리버스가 곧 배수: +1 × (리버스+1)
-		speed.Value += 1 + rebirths.Value
+		local gain = 1 + rebirths.Value
+		speed.Value += gain
 
 		popped = true
 		popSound(bubble)
-		TweenService:Create(bubble, TweenInfo.new(0.12), {
-			Size = Vector3.new(0.3, TILE - 2.2, TILE - 2.2),
-			Transparency = 0.75,
+		popFloater(bubble, gain)
+		TweenService:Create(bubble, TweenInfo.new(0.07, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
+			Size = downSize,
+			CFrame = downCF,
+			Transparency = 0.6,
 			Color = zoneColor,
 		}):Play()
 
 		task.delay(CONFIG.PopRespawn, function()
 			if not bubble.Parent then return end
-			TweenService:Create(bubble, TweenInfo.new(0.25, Enum.EasingStyle.Back), {
-				Size = Vector3.new(1.1, TILE - 0.9, TILE - 0.9),
+			TweenService:Create(bubble, TweenInfo.new(0.3, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {
+				Size = upSize,
+				CFrame = upCF,
 				Transparency = 0.15,
 				Color = Color3.fromRGB(235, 250, 255),
 			}):Play()
-			task.wait(0.25)
+			task.wait(0.3)
 			popped = false
 		end)
 	end)
@@ -587,6 +627,19 @@ local finalGround = makePart({
 })
 finalGround.Parent = map
 
+-- 고속 주행 이탈 방지 가드레일 (양옆 반투명 벽)
+local mapLength = (z + 24) - (-30)
+for _, side in { -1, 1 } do
+	local wall = makePart({
+		Name = "GuardRail",
+		Transparency = 0.92,
+		Color = Color3.fromRGB(200, 230, 255),
+		Size = Vector3.new(1, 16, mapLength),
+		CFrame = CFrame.new(side * ((fieldWidthStuds + 12) / 2 + 0.5), 7.5, (z - 6) / 2),
+	})
+	wall.Parent = map
+end
+
 local winPad = makePart({
 	Name = "WinPad",
 	Material = Enum.Material.Neon,
@@ -726,12 +779,23 @@ local function refresh()
 	subline.Text = ("🏆 %d   ♻️ %d (뽁 ×%d)"):format(wins.Value, rebirths.Value, rebirths.Value + 1)
 end
 
+-- 속도감 연출: Speed가 오를수록 시야각(FOV)이 넓어져 "빨라지는 몸느낌"을 증폭
+local function updateFov(value)
+	local camera = workspace.CurrentCamera
+	if not camera then return end
+	local target = math.clamp(70 + value * 0.055, 70, 95)
+	TweenService:Create(camera, TweenInfo.new(0.35, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
+		FieldOfView = target,
+	}):Play()
+end
+
 local lastSpeed = speed.Value
 
 speed.Changed:Connect(function(newValue)
 	local delta = newValue - lastSpeed
 	lastSpeed = newValue
 	refresh()
+	updateFov(newValue)
 
 	-- 카운터 펄스
 	counter.TextColor3 = delta >= 0 and Color3.fromRGB(190, 255, 210) or Color3.fromRGB(255, 190, 190)
@@ -754,6 +818,7 @@ end)
 wins.Changed:Connect(refresh)
 rebirths.Changed:Connect(refresh)
 refresh()
+updateFov(speed.Value)
 
 -- 서버 전광판 구독
 local announce = ReplicatedStorage:WaitForChild("Announce", 10)
