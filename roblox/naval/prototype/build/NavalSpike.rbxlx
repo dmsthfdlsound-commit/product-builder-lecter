@@ -1,0 +1,843 @@
+<roblox version="4">
+  <Item class="Lighting" referent="0">
+    <Properties>
+      <string name="Name">Lighting</string>
+      <float name="Brightness">2.2</float>
+      <float name="ClockTime">15.5</float>
+    </Properties>
+  </Item>
+  <Item class="ServerScriptService" referent="1">
+    <Properties>
+      <string name="Name">ServerScriptService</string>
+    </Properties>
+    <Item class="Script" referent="2">
+      <Properties>
+        <string name="Name">Main</string>
+        <token name="RunContext">0</token>
+        <string name="Source"><![CDATA[--------------------------------------------------------------------
+-- 해상전 스파이크 v0 — 1막 포격전 + 세트 트릭 검증용
+-- 설계: 갑판은 절대 움직이지 않는다. 바다·적함·카메라만 움직인다(클라 연출).
+-- 서버 = 정적 월드 생성 + 전투 권위(발사 판정·적 일제사격·HP).
+-- ⚠️ 스파이크 전용 코드 — 본편은 design.md 아키텍처로 재작성 예정.
+--------------------------------------------------------------------
+
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local CONFIG = {
+	FireCooldown = 6.0,
+	ShotDamage = 45,
+	ShotSpread = 9,          -- 착탄 산포 (studs)
+	CannonCount = 4,
+	EnemyHP = { Sail = 300, Hull = 600, Deck = 250 },
+	ShipHP = 1200,           -- 아군 선체 (공유)
+	VolleyBase = 95,         -- 적 일제사격 기본 피해
+	VolleyInterval = { 8, 11 },
+	VolleyFirstDelay = 12,   -- 리스폰 후 첫 공격 유예
+	BraceWindow = 1.0,       -- 경고~착탄 사이 브레이스 인정
+	PerfectWindow = 0.4,     -- 착탄 직전 퍼펙트 창
+	SinkRespawn = 9,
+}
+
+--------------------------------------------------------------------
+-- 리모트
+--------------------------------------------------------------------
+local remotes = Instance.new("Folder")
+remotes.Name = "Remotes"
+remotes.Parent = ReplicatedStorage
+local function mkRemote(name)
+	local r = Instance.new("RemoteEvent")
+	r.Name = name
+	r.Parent = remotes
+	return r
+end
+local RE_Fire = mkRemote("Fire")
+local RE_FireResult = mkRemote("FireResult")
+local RE_Volley = mkRemote("Volley")
+local RE_Brace = mkRemote("Brace")
+local RE_Game = mkRemote("GameEvent")
+
+-- 상태 (클라 HUD가 구독)
+local state = Instance.new("Folder")
+state.Name = "BattleState"
+state.Parent = ReplicatedStorage
+local function mkInt(name, v)
+	local i = Instance.new("IntValue")
+	i.Name = name
+	i.Value = v
+	i.Parent = state
+	return i
+end
+local hpSail = mkInt("SailHP", CONFIG.EnemyHP.Sail)
+local hpHull = mkInt("HullHP", CONFIG.EnemyHP.Hull)
+local hpDeck = mkInt("DeckHP", CONFIG.EnemyHP.Deck)
+local shipHP = mkInt("ShipHP", CONFIG.ShipHP)
+
+--------------------------------------------------------------------
+-- 월드 생성
+--------------------------------------------------------------------
+local function part(props, parent)
+	local p = Instance.new("Part")
+	p.Anchored = true
+	p.TopSurface = Enum.SurfaceType.Smooth
+	p.BottomSurface = Enum.SurfaceType.Smooth
+	for k, v in props do p[k] = v end
+	p.Parent = parent
+	return p
+end
+
+local world = Instance.new("Folder")
+world.Name = "NavalWorld"
+world.Parent = workspace
+
+-- 바다 (클라가 Y를 흔든다)
+local ocean = part({
+	Name = "Ocean", Size = Vector3.new(3000, 1, 3000),
+	CFrame = CFrame.new(0, -0.5, 0), Color = Color3.fromRGB(52, 132, 185),
+	Material = Enum.Material.SmoothPlastic, Transparency = 0.12,
+}, world)
+part({
+	Name = "OceanDeep", Size = Vector3.new(3000, 1, 3000),
+	CFrame = CFrame.new(0, -7, 0), Color = Color3.fromRGB(22, 70, 110),
+	Material = Enum.Material.SmoothPlastic,
+}, world)
+-- 포말 (클라가 드리프트)
+local foam = Instance.new("Folder")
+foam.Name = "Foam"
+foam.Parent = world
+math.randomseed(7)
+for i = 1, 26 do
+	part({
+		Name = "F" .. i, Size = Vector3.new(math.random(8, 16), 0.2, 1.6),
+		CFrame = CFrame.new(math.random(-500, 500), 0.15, math.random(-500, 500)),
+		Color = Color3.fromRGB(235, 248, 255), Transparency = 0.45,
+		CanCollide = false, Material = Enum.Material.SmoothPlastic,
+	}, foam)
+end
+
+-- 아군 함선 (완전 고정 — 세트)
+local myShip = Instance.new("Model")
+myShip.Name = "PlayerShip"
+myShip.Parent = world
+part({ Name = "Hull", Size = Vector3.new(26, 8, 60), CFrame = CFrame.new(0, 2, 0),
+	Color = Color3.fromRGB(96, 66, 42), Material = Enum.Material.WoodPlanks }, myShip)
+local deck = part({ Name = "Deck", Size = Vector3.new(24, 2, 56), CFrame = CFrame.new(0, 7, 0),
+	Color = Color3.fromRGB(150, 110, 70), Material = Enum.Material.WoodPlanks }, myShip)
+for _, side in { -1, 1 } do
+	part({ Name = "Rail", Size = Vector3.new(1, 3, 56), CFrame = CFrame.new(side * 12.2, 9.5, 0),
+		Color = Color3.fromRGB(96, 66, 42), Material = Enum.Material.Wood }, myShip)
+end
+for _, zEnd in { -28, 28 } do
+	part({ Name = "RailEnd", Size = Vector3.new(24, 3, 1), CFrame = CFrame.new(0, 9.5, zEnd),
+		Color = Color3.fromRGB(96, 66, 42), Material = Enum.Material.Wood }, myShip)
+end
+for _, mz in { -14, 12 } do
+	part({ Name = "Mast", Shape = Enum.PartType.Cylinder, Size = Vector3.new(30, 2.2, 2.2),
+		CFrame = CFrame.new(0, 23, mz) * CFrame.Angles(0, 0, math.rad(90)),
+		Color = Color3.fromRGB(120, 85, 55), Material = Enum.Material.Wood }, myShip)
+	part({ Name = "Sail", Size = Vector3.new(17, 13, 0.4), CFrame = CFrame.new(0, 21, mz),
+		Color = Color3.fromRGB(245, 240, 225), Material = Enum.Material.Fabric }, myShip)
+end
+-- 아군 대포 (우현 = +X, 적 방향)
+local muzzles = {}
+for i, cz in { -18, -6, 6, 18 } do
+	local c = part({ Name = "Cannon" .. i, Shape = Enum.PartType.Cylinder,
+		Size = Vector3.new(6.5, 1.8, 1.8), CFrame = CFrame.new(12.5, 9, cz),
+		Color = Color3.fromRGB(45, 45, 52), Material = Enum.Material.Metal }, myShip)
+	c:SetAttribute("PlayerCannon", true)
+	muzzles[i] = Vector3.new(16.2, 9, cz)
+end
+local spawnPad = Instance.new("SpawnLocation")
+spawnPad.Size = Vector3.new(10, 1, 10)
+spawnPad.CFrame = CFrame.new(0, 8.6, 18)
+spawnPad.Anchored = true
+spawnPad.Neutral = true
+spawnPad.Transparency = 1
+spawnPad.Parent = myShip
+
+-- 적함 (서버는 정적 — 흔들림은 클라 연출)
+local enemy = Instance.new("Model")
+enemy.Name = "EnemyShip"
+enemy.Parent = world
+local function seg(p, s) p:SetAttribute("Seg", s) return p end
+seg(part({ Name = "EHull", Size = Vector3.new(26, 9, 72), CFrame = CFrame.new(330, 2.5, 0),
+	Color = Color3.fromRGB(70, 50, 60), Material = Enum.Material.WoodPlanks }, enemy), "Hull")
+seg(part({ Name = "EHullTop", Size = Vector3.new(24, 3, 68), CFrame = CFrame.new(330, 8.5, 0),
+	Color = Color3.fromRGB(88, 62, 72), Material = Enum.Material.WoodPlanks }, enemy), "Hull")
+local eDeck = seg(part({ Name = "EDeck", Size = Vector3.new(22, 1, 64), CFrame = CFrame.new(330, 10.2, 0),
+	Color = Color3.fromRGB(140, 100, 66), Material = Enum.Material.WoodPlanks }, enemy), "Deck")
+for _, mz in { -16, 14 } do
+	seg(part({ Name = "EMast", Shape = Enum.PartType.Cylinder, Size = Vector3.new(34, 2.4, 2.4),
+		CFrame = CFrame.new(330, 27, mz) * CFrame.Angles(0, 0, math.rad(90)),
+		Color = Color3.fromRGB(100, 70, 45), Material = Enum.Material.Wood }, enemy), "Sail")
+	seg(part({ Name = "ESail", Size = Vector3.new(19, 15, 0.5), CFrame = CFrame.new(330, 24, mz),
+		Color = Color3.fromRGB(230, 220, 200), Material = Enum.Material.Fabric }, enemy), "Sail")
+end
+-- 적 선원 표적 (갑판 전략)
+for i, cz in { -20, -8, 5, 18 } do
+	seg(part({ Name = "ECrew" .. i, Size = Vector3.new(2.2, 5, 2.2),
+		CFrame = CFrame.new(324 + (i % 2) * 10, 13.2, cz),
+		Color = Color3.fromRGB(190, 150, 110), Material = Enum.Material.SmoothPlastic }, enemy), "Deck")
+end
+-- 적 일제사격 포 (아군 방향 -X)
+for i, cz in { -22, -8, 8, 22 } do
+	local c = part({ Name = "EVolleyCannon" .. i, Shape = Enum.PartType.Cylinder,
+		Size = Vector3.new(6, 1.8, 1.8), CFrame = CFrame.new(316.5, 9.5, cz),
+		Color = Color3.fromRGB(40, 38, 46), Material = Enum.Material.Metal }, enemy)
+	c:SetAttribute("VolleyCannon", true)
+end
+
+--------------------------------------------------------------------
+-- 전투 상태
+--------------------------------------------------------------------
+local lastFire = {}   -- [player] = os.clock
+local lastBrace = {}  -- [player] = os.clock
+local sunk = false
+local roundActive = true
+
+Players.PlayerAdded:Connect(function(player)
+	local stats = Instance.new("Folder")
+	stats.Name = "leaderstats"
+	local s = Instance.new("IntValue"); s.Name = "격침"; s.Value = 0; s.Parent = stats
+	local p = Instance.new("IntValue"); p.Name = "퍼펙트"; p.Value = 0; p.Parent = stats
+	stats.Parent = player
+end)
+Players.PlayerRemoving:Connect(function(player)
+	lastFire[player] = nil
+	lastBrace[player] = nil
+end)
+
+local function addStat(player, name, n)
+	local v = player:FindFirstChild("leaderstats") and player.leaderstats:FindFirstChild(name)
+	if v then v.Value += n end
+end
+
+local rayParams = RaycastParams.new()
+rayParams.FilterType = Enum.RaycastFilterType.Include
+rayParams.FilterDescendantsInstances = { enemy }
+
+-- 발사 처리
+RE_Fire.OnServerEvent:Connect(function(player, aimPos)
+	if sunk or not roundActive then return end
+	if typeof(aimPos) ~= "Vector3" then return end
+	local now = os.clock()
+	if lastFire[player] and now - lastFire[player] < CONFIG.FireCooldown - 0.15 then return end
+	lastFire[player] = now
+	-- 조준점 새니티: 적함 근방만 허용
+	if (aimPos - Vector3.new(330, 12, 0)).Magnitude > 140 then return end
+
+	local shots = {}
+	for i = 1, CONFIG.CannonCount do
+		local from = muzzles[i]
+		local target = aimPos + Vector3.new(
+			(math.random() - 0.5) * 2 * CONFIG.ShotSpread,
+			(math.random() - 0.5) * 2 * CONFIG.ShotSpread * 0.7,
+			(math.random() - 0.5) * 2 * CONFIG.ShotSpread)
+		local dir = (target - from).Unit * 600
+		local hit = workspace:Raycast(from, dir, rayParams)
+		local shot = { from = from, to = target, seg = "Miss", dmg = 0 }
+		if hit then
+			local segName = hit.Instance:GetAttribute("Seg") or "Hull"
+			shot.to = hit.Position
+			shot.seg = segName
+			shot.dmg = CONFIG.ShotDamage
+			if segName == "Sail" and hpSail.Value > 0 then
+				hpSail.Value = math.max(0, hpSail.Value - shot.dmg)
+			elseif segName == "Deck" and hpDeck.Value > 0 then
+				hpDeck.Value = math.max(0, hpDeck.Value - shot.dmg)
+			else
+				shot.seg = "Hull"
+				hpHull.Value = math.max(0, hpHull.Value - shot.dmg)
+			end
+		else
+			-- 물기둥 연출용: 수면 교차점
+			local tWater = from.Y / math.max(0.1, -dir.Unit.Y)
+			if dir.Unit.Y < 0 then
+				shot.to = from + dir.Unit * math.min(tWater, 550)
+			end
+		end
+		table.insert(shots, shot)
+	end
+	RE_FireResult:FireAllClients({ shooter = player.Name, shots = shots })
+
+	-- 격침 판정
+	if hpHull.Value <= 0 and not sunk then
+		sunk = true
+		RE_Game:FireAllClients({ type = "sunk",
+			sails = hpSail.Value <= 0, crew = hpDeck.Value <= 0 })
+		for _, plr in Players:GetPlayers() do addStat(plr, "격침", 1) end
+		task.delay(CONFIG.SinkRespawn, function()
+			hpSail.Value = CONFIG.EnemyHP.Sail
+			hpHull.Value = CONFIG.EnemyHP.Hull
+			hpDeck.Value = CONFIG.EnemyHP.Deck
+			shipHP.Value = math.min(CONFIG.ShipHP, shipHP.Value + 400) -- 격침 보상: 수리
+			sunk = false
+			RE_Game:FireAllClients({ type = "respawn" })
+		end)
+	end
+end)
+
+RE_Brace.OnServerEvent:Connect(function(player)
+	lastBrace[player] = os.clock()
+end)
+
+-- 적 일제사격 루프
+task.spawn(function()
+	task.wait(CONFIG.VolleyFirstDelay)
+	while true do
+		local interval = math.random(CONFIG.VolleyInterval[1], CONFIG.VolleyInterval[2])
+		-- 돛 파괴 시 재장전 느려짐 (부위 전략 검증 포인트)
+		if hpSail.Value <= 0 then interval = math.floor(interval * 1.6) end
+		task.wait(interval)
+		if sunk or #Players:GetPlayers() == 0 then continue end
+
+		RE_Volley:FireAllClients({ phase = "warn" })
+		task.wait(1.0)
+		local impactT = os.clock()
+
+		-- 승조원 중 최고 등급 브레이스 적용 (협동 보상)
+		local bestFactor, bestGrade = 1.0, "full"
+		for _, plr in Players:GetPlayers() do
+			local bt = lastBrace[plr]
+			if bt then
+				local delta = impactT - bt
+				if delta >= 0 and delta <= CONFIG.PerfectWindow then
+					if 0.2 < bestFactor then bestFactor, bestGrade = 0.2, "perfect" end
+					addStat(plr, "퍼펙트", 1)
+				elseif delta >= 0 and delta <= CONFIG.BraceWindow and bestFactor > 0.45 then
+					bestFactor, bestGrade = 0.45, "brace"
+				end
+			end
+		end
+
+		local dmg = math.random(CONFIG.VolleyBase - 15, CONFIG.VolleyBase + 15)
+		-- 선원 제압 시 화력 반감 (부위 전략 검증 포인트 2)
+		if hpDeck.Value <= 0 then dmg = math.floor(dmg * 0.5) end
+		dmg = math.floor(dmg * bestFactor)
+		shipHP.Value = math.max(0, shipHP.Value - dmg)
+
+		RE_Volley:FireAllClients({ phase = "hit", dmg = dmg, grade = bestGrade, shipHP = shipHP.Value })
+
+		if shipHP.Value <= 0 then
+			roundActive = false
+			RE_Game:FireAllClients({ type = "defeat" })
+			task.wait(5)
+			hpSail.Value = CONFIG.EnemyHP.Sail
+			hpHull.Value = CONFIG.EnemyHP.Hull
+			hpDeck.Value = CONFIG.EnemyHP.Deck
+			shipHP.Value = CONFIG.ShipHP
+			sunk = false
+			roundActive = true
+			RE_Game:FireAllClients({ type = "reset" })
+			task.wait(CONFIG.VolleyFirstDelay)
+		end
+	end
+end)
+
+print("[NavalSpike] 월드 생성 완료 — 갑판 고정, 전투 루프 가동")
+]]></string>
+      </Properties>
+    </Item>
+  </Item>
+  <Item class="StarterPlayer" referent="3">
+    <Properties>
+      <string name="Name">StarterPlayer</string>
+    </Properties>
+    <Item class="StarterPlayerScripts" referent="4">
+      <Properties>
+        <string name="Name">StarterPlayerScripts</string>
+      </Properties>
+      <Item class="LocalScript" referent="5">
+        <Properties>
+          <string name="Name">Client</string>
+          <string name="Source"><![CDATA[--------------------------------------------------------------------
+-- 해상전 스파이크 — 클라이언트
+-- 세트 트릭: 갑판(월드)은 고정, 바다·적함·카메라가 움직여 항해감을 만든다.
+-- 조준(마우스/터치) → 일제사격 → 탄도 연출 → 부위 피해 / 브레이스 타이밍 방어.
+--------------------------------------------------------------------
+
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
+local TweenService = game:GetService("TweenService")
+
+local player = Players.LocalPlayer
+local camera = workspace.CurrentCamera
+
+local world = workspace:WaitForChild("NavalWorld")
+local ocean = world:WaitForChild("Ocean")
+local foam = world:WaitForChild("Foam")
+local enemy = world:WaitForChild("EnemyShip")
+local myShip = world:WaitForChild("PlayerShip")
+
+local remotes = ReplicatedStorage:WaitForChild("Remotes")
+local RE_Fire = remotes:WaitForChild("Fire")
+local RE_FireResult = remotes:WaitForChild("FireResult")
+local RE_Volley = remotes:WaitForChild("Volley")
+local RE_Brace = remotes:WaitForChild("Brace")
+local RE_Game = remotes:WaitForChild("GameEvent")
+
+local bs = ReplicatedStorage:WaitForChild("BattleState")
+local hpSail = bs:WaitForChild("SailHP")
+local hpHull = bs:WaitForChild("HullHP")
+local hpDeck = bs:WaitForChild("DeckHP")
+local shipHP = bs:WaitForChild("ShipHP")
+
+local FIRE_CD = 6.0
+local MAX_SAIL = math.max(1, hpSail.Value)
+local MAX_HULL = math.max(1, hpHull.Value)
+local MAX_DECK = math.max(1, hpDeck.Value)
+local MAX_SHIP = math.max(1, shipHP.Value)
+
+--------------------------------------------------------------------
+-- 사운드 (내장 에셋 — 본편에서 실제 SFX로 교체)
+--------------------------------------------------------------------
+local function play(speed, vol)
+	local s = Instance.new("Sound")
+	s.SoundId = "rbxasset://sounds/impact_water.mp3"
+	s.PlaybackSpeed = speed
+	s.Volume = vol
+	s.Parent = camera
+	s:Play()
+	task.delay(2.5, function() s:Destroy() end)
+end
+local function ping(speed, vol)
+	local s = Instance.new("Sound")
+	s.SoundId = "rbxasset://sounds/electronicpingshort.wav"
+	s.PlaybackSpeed = speed
+	s.Volume = vol
+	s.Parent = camera
+	s:Play()
+	task.delay(1.5, function() s:Destroy() end)
+end
+
+--------------------------------------------------------------------
+-- 세트 트릭: 바다·포말·적함 흔들기 (갑판은 절대 건드리지 않음)
+--------------------------------------------------------------------
+local enemyBase = {}   -- part → 기준 CFrame
+for _, p in enemy:GetDescendants() do
+	if p:IsA("BasePart") then enemyBase[p] = p.CFrame end
+end
+local foamBase = {}
+for _, p in foam:GetChildren() do
+	if p:IsA("BasePart") then foamBase[p] = p.Position end
+end
+local ENEMY_CENTER = CFrame.new(330, 6, 0)
+local sinkStart = nil -- os.clock (침몰 연출)
+
+local shakeAmp, shakeUntil = 0, 0
+local function shake(amp, dur)
+	shakeAmp = math.max(shakeAmp, amp)
+	shakeUntil = os.clock() + dur
+end
+
+RunService.RenderStepped:Connect(function()
+	local t = workspace:GetServerTimeNow()
+
+	-- 바다 상하동 + 포말 드리프트 (배가 전진하는 듯한 착시)
+	ocean.CFrame = CFrame.new(0, -0.5 + math.sin(t * 0.5) * 0.8, 0)
+	for p, base in foamBase do
+		local x = ((base.X + t * 7 + 500) % 1000) - 500
+		p.Position = Vector3.new(x, 0.15 + math.sin(t * 0.5 + base.Z) * 0.8, base.Z)
+	end
+
+	-- 적함 바빙 (+침몰 연출)
+	local bob = CFrame.new(0, math.sin(t * 0.62) * 1.5, 0)
+		* CFrame.Angles(math.sin(t * 0.41) * 0.022, 0, math.sin(t * 0.55) * 0.035)
+	if sinkStart then
+		local a = math.clamp((os.clock() - sinkStart) / 4.5, 0, 1)
+		bob = CFrame.new(0, -24 * a * a, 0) * CFrame.Angles(0, 0, math.rad(28) * a) * bob
+	end
+	local xf = ENEMY_CENTER * bob * ENEMY_CENTER:Inverse()
+	for p, base in enemyBase do
+		if p.Parent then p.CFrame = xf * base end
+	end
+
+	-- 카메라: 몸의 흔들림(오프셋) + 피격 셰이크
+	local char = player.Character
+	local hum = char and char:FindFirstChildOfClass("Humanoid")
+	if hum then
+		local sway = Vector3.new(math.sin(t * 0.5) * 0.25, math.sin(t * 0.83) * 0.45, 0)
+		if os.clock() < shakeUntil then
+			sway += Vector3.new((math.random() - 0.5) * shakeAmp, (math.random() - 0.5) * shakeAmp, 0)
+		else
+			shakeAmp = 0
+		end
+		hum.CameraOffset = sway
+	end
+end)
+
+--------------------------------------------------------------------
+-- HUD
+--------------------------------------------------------------------
+local gui = Instance.new("ScreenGui")
+gui.Name = "NavalHUD"
+gui.ResetOnSpawn = false
+gui.IgnoreGuiInset = true
+gui.Parent = player:WaitForChild("PlayerGui")
+
+local function label(props, parent)
+	local l = Instance.new("TextLabel")
+	l.BackgroundTransparency = 1
+	l.Font = Enum.Font.FredokaOne
+	l.TextScaled = true
+	l.TextColor3 = Color3.new(1, 1, 1)
+	l.TextStrokeTransparency = 0.35
+	for k, v in props do l[k] = v end
+	l.Parent = parent
+	return l
+end
+local function bar(y, name, color)
+	local holder = Instance.new("Frame")
+	holder.AnchorPoint = Vector2.new(0.5, 0)
+	holder.Position = UDim2.new(0.5, 0, 0, y)
+	holder.Size = UDim2.new(0.36, 0, 0, 16)
+	holder.BackgroundColor3 = Color3.fromRGB(20, 24, 40)
+	holder.BackgroundTransparency = 0.25
+	holder.Parent = gui
+	local corner = Instance.new("UICorner"); corner.CornerRadius = UDim.new(0, 8); corner.Parent = holder
+	local fill = Instance.new("Frame")
+	fill.Size = UDim2.fromScale(1, 1)
+	fill.BackgroundColor3 = color
+	fill.Parent = holder
+	local fc = Instance.new("UICorner"); fc.CornerRadius = UDim.new(0, 8); fc.Parent = fill
+	label({ Position = UDim2.new(0, 6, 0, -1), Size = UDim2.new(1, -12, 1, 2),
+		Text = name, TextXAlignment = Enum.TextXAlignment.Left, ZIndex = 3 }, holder)
+	return fill
+end
+
+label({ AnchorPoint = Vector2.new(0.5, 0), Position = UDim2.new(0.5, 0, 0, 14),
+	Size = UDim2.new(0.5, 0, 0, 26), Text = "⚔️ 적함 · 연습 스쿠너" }, gui)
+local fSail = bar(46, "⛵ 돛", Color3.fromRGB(80, 200, 255))
+local fHull = bar(66, "🛡️ 선체", Color3.fromRGB(255, 150, 60))
+local fDeck = bar(86, "👥 갑판", Color3.fromRGB(255, 90, 90))
+local segTip = label({ AnchorPoint = Vector2.new(0.5, 0), Position = UDim2.new(0.5, 0, 0, 106),
+	Size = UDim2.new(0.6, 0, 0, 20), Text = "", TextColor3 = Color3.fromRGB(255, 230, 140) }, gui)
+
+-- 아군 선체
+label({ Position = UDim2.new(0, 14, 1, -96), Size = UDim2.new(0, 150, 0, 20),
+	Text = "🚢 아군 선체", TextXAlignment = Enum.TextXAlignment.Left }, gui)
+local myHolder = Instance.new("Frame")
+myHolder.Position = UDim2.new(0, 14, 1, -72)
+myHolder.Size = UDim2.new(0.3, 0, 0, 18)
+myHolder.BackgroundColor3 = Color3.fromRGB(20, 24, 40)
+myHolder.BackgroundTransparency = 0.25
+myHolder.Parent = gui
+local mhc = Instance.new("UICorner"); mhc.CornerRadius = UDim.new(0, 9); mhc.Parent = myHolder
+local fShip = Instance.new("Frame")
+fShip.Size = UDim2.fromScale(1, 1)
+fShip.BackgroundColor3 = Color3.fromRGB(90, 220, 120)
+fShip.Parent = myHolder
+local fsc = Instance.new("UICorner"); fsc.CornerRadius = UDim.new(0, 9); fsc.Parent = fShip
+
+local tip = label({ AnchorPoint = Vector2.new(0.5, 1), Position = UDim2.new(0.5, 0, 1, -8),
+	Size = UDim2.new(0.9, 0, 0, 18), Text = "🎯 적함을 클릭/터치로 조준 · 돛=발묶기 · 갑판=화력 감소 · 선체=격침  (PC: F 발사 · G 브레이스)",
+	TextTransparency = 0.15 }, gui)
+
+-- 버튼
+local function button(text, pos, color)
+	local b = Instance.new("TextButton")
+	b.AnchorPoint = Vector2.new(1, 1)
+	b.Position = pos
+	b.Size = UDim2.fromOffset(150, 62)
+	b.Font = Enum.Font.FredokaOne
+	b.TextScaled = true
+	b.Text = text
+	b.TextColor3 = Color3.new(1, 1, 1)
+	b.BackgroundColor3 = color
+	b.Parent = gui
+	local c = Instance.new("UICorner"); c.CornerRadius = UDim.new(0, 14); c.Parent = b
+	return b
+end
+local fireBtn = button("💥 일제사격", UDim2.new(1, -14, 1, -14), Color3.fromRGB(226, 92, 62))
+local braceBtn = button("🛡️ 브레이스", UDim2.new(1, -14, 1, -86), Color3.fromRGB(70, 110, 200))
+
+-- 중앙 배너
+local banner = label({ AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.new(0.5, 0, 0.32, 0),
+	Size = UDim2.new(0.85, 0, 0, 54), Text = "", TextColor3 = Color3.fromRGB(255, 225, 120) }, gui)
+local subBanner = label({ AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.new(0.5, 0, 0.40, 0),
+	Size = UDim2.new(0.8, 0, 0, 26), Text = "" }, gui)
+local bannerUntil = 0
+local function showBanner(text, sub, dur)
+	banner.Text = text
+	subBanner.Text = sub or ""
+	bannerUntil = os.clock() + (dur or 3)
+	task.delay(dur or 3, function()
+		if os.clock() >= bannerUntil then banner.Text = ""; subBanner.Text = "" end
+	end)
+end
+
+local function refreshBars()
+	fSail.Size = UDim2.fromScale(hpSail.Value / MAX_SAIL, 1)
+	fHull.Size = UDim2.fromScale(hpHull.Value / MAX_HULL, 1)
+	fDeck.Size = UDim2.fromScale(hpDeck.Value / MAX_DECK, 1)
+	fShip.Size = UDim2.fromScale(shipHP.Value / MAX_SHIP, 1)
+	fShip.BackgroundColor3 = shipHP.Value / MAX_SHIP > 0.35
+		and Color3.fromRGB(90, 220, 120) or Color3.fromRGB(235, 90, 70)
+	local effects = {}
+	if hpSail.Value <= 0 then table.insert(effects, "⛵ 적 재장전 +60%") end
+	if hpDeck.Value <= 0 then table.insert(effects, "👥 적 화력 −50%") end
+	segTip.Text = table.concat(effects, "   ")
+end
+hpSail.Changed:Connect(refreshBars)
+hpHull.Changed:Connect(refreshBars)
+hpDeck.Changed:Connect(refreshBars)
+shipHP.Changed:Connect(refreshBars)
+refreshBars()
+
+--------------------------------------------------------------------
+-- 조준
+--------------------------------------------------------------------
+local aimPos = nil
+local crosshair = Instance.new("Part")
+crosshair.Shape = Enum.PartType.Ball
+crosshair.Size = Vector3.new(2.4, 2.4, 2.4)
+crosshair.Material = Enum.Material.Neon
+crosshair.Color = Color3.fromRGB(255, 230, 90)
+crosshair.Anchored = true
+crosshair.CanCollide = false
+crosshair.Transparency = 1
+crosshair.Parent = workspace
+local chGui = Instance.new("BillboardGui")
+chGui.Size = UDim2.fromScale(6, 1.6)
+chGui.StudsOffset = Vector3.new(0, 2.4, 0)
+chGui.AlwaysOnTop = true
+chGui.Parent = crosshair
+local chLabel = label({ Size = UDim2.fromScale(1, 1), Text = "" }, chGui)
+
+local SEG_KO = { Sail = "⛵ 돛", Hull = "🛡️ 선체", Deck = "👥 갑판" }
+local SEG_COLOR = {
+	Sail = Color3.fromRGB(80, 200, 255),
+	Hull = Color3.fromRGB(255, 150, 60),
+	Deck = Color3.fromRGB(255, 90, 90),
+}
+
+local aimParams = RaycastParams.new()
+aimParams.FilterType = Enum.RaycastFilterType.Include
+aimParams.FilterDescendantsInstances = { enemy }
+
+local function updateAim(screenPos)
+	local ray = camera:ViewportPointToRay(screenPos.X, screenPos.Y)
+	local hit = workspace:Raycast(ray.Origin, ray.Direction * 900, aimParams)
+	if hit then
+		aimPos = hit.Position
+		local seg = hit.Instance:GetAttribute("Seg") or "Hull"
+		crosshair.Position = hit.Position
+		crosshair.Transparency = 0.15
+		crosshair.Color = SEG_COLOR[seg]
+		chLabel.Text = SEG_KO[seg]
+		chLabel.TextColor3 = SEG_COLOR[seg]
+	end
+end
+
+UserInputService.InputChanged:Connect(function(input, processed)
+	if processed then return end
+	if input.UserInputType == Enum.UserInputType.MouseMovement then
+		updateAim(input.Position)
+	end
+end)
+UserInputService.InputBegan:Connect(function(input, processed)
+	if processed then return end
+	if input.UserInputType == Enum.UserInputType.Touch
+		or input.UserInputType == Enum.UserInputType.MouseButton1 then
+		updateAim(input.Position)
+	end
+end)
+
+--------------------------------------------------------------------
+-- 발사
+--------------------------------------------------------------------
+local lastFireAt = -99
+local function tryFire()
+	if os.clock() - lastFireAt < FIRE_CD then return end
+	if not aimPos then
+		showBanner("🎯 먼저 적함을 조준!", "적함을 클릭/터치하세요", 1.2)
+		return
+	end
+	lastFireAt = os.clock()
+	RE_Fire:FireServer(aimPos)
+end
+fireBtn.Activated:Connect(tryFire)
+braceBtn.Activated:Connect(function() RE_Brace:FireServer() end)
+UserInputService.InputBegan:Connect(function(input, processed)
+	if processed then return end
+	if input.KeyCode == Enum.KeyCode.F then tryFire() end
+	if input.KeyCode == Enum.KeyCode.G then RE_Brace:FireServer() end
+end)
+
+-- 쿨다운 표시
+RunService.Heartbeat:Connect(function()
+	local left = FIRE_CD - (os.clock() - lastFireAt)
+	if left > 0 then
+		fireBtn.Text = ("재장전 %.1f"):format(left)
+		fireBtn.BackgroundColor3 = Color3.fromRGB(120, 84, 74)
+	else
+		fireBtn.Text = "💥 일제사격"
+		fireBtn.BackgroundColor3 = Color3.fromRGB(226, 92, 62)
+	end
+end)
+
+--------------------------------------------------------------------
+-- 탄도 연출
+--------------------------------------------------------------------
+local function floater(pos, text, color)
+	local anchor = Instance.new("Part")
+	anchor.Anchored = true; anchor.CanCollide = false; anchor.Transparency = 1
+	anchor.Size = Vector3.new(0.2, 0.2, 0.2); anchor.Position = pos
+	anchor.Parent = workspace
+	local bb = Instance.new("BillboardGui")
+	bb.Size = UDim2.fromScale(7, 2.2); bb.AlwaysOnTop = true; bb.Parent = anchor
+	local l = label({ Size = UDim2.fromScale(1, 1), Text = text, TextColor3 = color }, bb)
+	task.spawn(function()
+		for i = 1, 20 do
+			bb.StudsOffset = Vector3.new(0, i * 0.28, 0)
+			l.TextTransparency = i / 20
+			task.wait(0.035)
+		end
+		anchor:Destroy()
+	end)
+end
+
+local function burst(pos, color, count, speed)
+	local anchor = Instance.new("Part")
+	anchor.Anchored = true; anchor.CanCollide = false; anchor.Transparency = 1
+	anchor.Size = Vector3.new(1, 1, 1); anchor.Position = pos
+	anchor.Parent = workspace
+	local em = Instance.new("ParticleEmitter")
+	em.Color = ColorSequence.new(color)
+	em.Lifetime = NumberRange.new(0.35, 0.8)
+	em.Speed = NumberRange.new(speed * 0.6, speed)
+	em.SpreadAngle = Vector2.new(180, 180)
+	em.Size = NumberSequence.new(1.4, 0.2)
+	em.Parent = anchor
+	em:Emit(count)
+	task.delay(1.2, function() anchor:Destroy() end)
+end
+
+local function flyBall(from, to, seg, dmg, delay)
+	task.delay(delay, function()
+		play(0.42 + math.random() * 0.1, 0.7) -- 발사 붐
+		burst(from, Color3.fromRGB(200, 200, 200), 14, 10) -- 포연
+		shake(0.5, 0.15)
+		local ball = Instance.new("Part")
+		ball.Shape = Enum.PartType.Ball
+		ball.Size = Vector3.new(1.1, 1.1, 1.1)
+		ball.Color = Color3.fromRGB(30, 30, 34)
+		ball.Material = Enum.Material.Metal
+		ball.Anchored = true; ball.CanCollide = false
+		ball.Parent = workspace
+		local dist = (to - from).Magnitude
+		local dur = math.max(0.35, dist / 380)
+		local mid = (from + to) / 2 + Vector3.new(0, dist * 0.10, 0)
+		local t0 = os.clock()
+		while true do
+			local a = (os.clock() - t0) / dur
+			if a >= 1 then break end
+			local p1 = from:Lerp(mid, a)
+			local p2 = mid:Lerp(to, a)
+			ball.Position = p1:Lerp(p2, a)
+			RunService.RenderStepped:Wait()
+		end
+		ball:Destroy()
+		if seg == "Miss" then
+			burst(Vector3.new(to.X, 0.5, to.Z), Color3.fromRGB(220, 240, 255), 22, 26)
+			play(0.9 + math.random() * 0.25, 0.5)
+			floater(to + Vector3.new(0, 3, 0), "빗나감", Color3.fromRGB(200, 210, 230))
+		else
+			burst(to, Color3.fromRGB(255, 170, 70), 26, 30)
+			burst(to, Color3.fromRGB(120, 80, 50), 16, 18)
+			ping(0.5 + math.random() * 0.15, 0.5)
+			floater(to + Vector3.new(0, 3, 0), "-" .. dmg .. " " .. (SEG_KO[seg] or ""), SEG_COLOR[seg] or Color3.new(1, 1, 1))
+		end
+	end)
+end
+
+RE_FireResult.OnClientEvent:Connect(function(data)
+	for i, shot in data.shots do
+		flyBall(shot.from, shot.to, shot.seg, shot.dmg, (i - 1) * 0.09)
+	end
+end)
+
+--------------------------------------------------------------------
+-- 적 일제사격 / 브레이스
+--------------------------------------------------------------------
+local volleyGlow = {}
+for _, p in enemy:GetDescendants() do
+	if p:IsA("BasePart") and p:GetAttribute("VolleyCannon") then
+		table.insert(volleyGlow, p)
+	end
+end
+local vignette = Instance.new("Frame")
+vignette.Size = UDim2.fromScale(1, 1)
+vignette.BackgroundColor3 = Color3.fromRGB(255, 40, 40)
+vignette.BackgroundTransparency = 1
+vignette.ZIndex = 0
+vignette.Parent = gui
+
+RE_Volley.OnClientEvent:Connect(function(data)
+	if data.phase == "warn" then
+		for _, c in volleyGlow do
+			c.Material = Enum.Material.Neon
+			c.Color = Color3.fromRGB(255, 70, 60)
+		end
+		vignette.BackgroundTransparency = 0.82
+		braceBtn.BackgroundColor3 = Color3.fromRGB(255, 180, 40)
+		braceBtn.Text = "🛡️ 지금 브레이스!!"
+		ping(0.7, 0.8); ping(0.55, 0.8)
+		task.delay(1.1, function()
+			for _, c in volleyGlow do
+				c.Material = Enum.Material.Metal
+				c.Color = Color3.fromRGB(40, 38, 46)
+			end
+			vignette.BackgroundTransparency = 1
+			braceBtn.BackgroundColor3 = Color3.fromRGB(70, 110, 200)
+			braceBtn.Text = "🛡️ 브레이스"
+		end)
+	elseif data.phase == "hit" then
+		play(0.38, 1)
+		if data.grade == "perfect" then
+			shake(0.6, 0.25)
+			showBanner("✨ PERFECT 브레이스!", ("피해 −80%%  (−%d)"):format(data.dmg), 1.6)
+		elseif data.grade == "brace" then
+			shake(1.4, 0.4)
+			showBanner("🛡️ 브레이스!", ("피해 −55%%  (−%d)"):format(data.dmg), 1.6)
+		else
+			shake(2.6, 0.7)
+			showBanner("💥 직격!!", ("−%d 피해 — G키/버튼으로 막으세요"):format(data.dmg), 1.8)
+		end
+		burst(Vector3.new(10, 9, math.random(-20, 20)), Color3.fromRGB(150, 100, 60), 20, 22)
+	end
+end)
+
+--------------------------------------------------------------------
+-- 게임 이벤트 (격침/패배/리셋)
+--------------------------------------------------------------------
+RE_Game.OnClientEvent:Connect(function(data)
+	if data.type == "sunk" then
+		sinkStart = os.clock()
+		play(0.3, 1)
+		shake(1.2, 0.6)
+		local bonus = {}
+		if data.sails then table.insert(bonus, "돛 완파") end
+		if data.crew then table.insert(bonus, "선원 제압") end
+		showBanner("⚓ 격침!! +1", #bonus > 0 and ("보너스: " .. table.concat(bonus, " · ")) or "다음 적함 접근 중…", 5)
+	elseif data.type == "respawn" then
+		sinkStart = nil
+		showBanner("🏴‍☠️ 새 적함 등장!", "돛/갑판/선체 — 어디를 노릴지가 전략", 2.5)
+	elseif data.type == "defeat" then
+		shake(3, 1)
+		showBanner("🌊 침몰… 구조됩니다", "손실 없음 — 5초 후 재도전", 4.5)
+	elseif data.type == "reset" then
+		sinkStart = nil
+		showBanner("⚔️ 전투 재개!", "", 2)
+	end
+end)
+
+showBanner("⚓ 해상전 스파이크", "적함을 조준하고 💥 일제사격! (부위마다 효과가 다릅니다)", 4)
+]]></string>
+        </Properties>
+      </Item>
+    </Item>
+  </Item>
+</roblox>

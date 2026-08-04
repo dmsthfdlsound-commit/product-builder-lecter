@@ -1,0 +1,24 @@
+{
+  "name": "NavalSpike",
+  "tree": {
+    "$className": "DataModel",
+    "ServerScriptService": {
+      "$className": "ServerScriptService",
+      "Main": { "$path": "src/server/Main.server.lua" }
+    },
+    "StarterPlayer": {
+      "$className": "StarterPlayer",
+      "StarterPlayerScripts": {
+        "$className": "StarterPlayerScripts",
+        "Client": { "$path": "src/client/Client.client.lua" }
+      }
+    },
+    "Lighting": {
+      "$className": "Lighting",
+      "$properties": {
+        "Brightness": 2.2,
+        "ClockTime": 15.5
+      }
+    }
+  }
+}
