@@ -806,12 +806,16 @@ RE_Battle.OnClientEvent:Connect(function(data)
 		phaseXTarget = 291
 		fireLabel = "⚔️ 백병전!"
 		for id in hooks do removeHook(id) end
-		showBanner("🪝 3막 — 도선!!", "널판을 건너 적 선원 소탕 — 커틀러스(1번) 장착 후 클릭/탭", 4)
+		showBanner("🪝 3막 — 도선!!", "아군 선원 3명과 함께 돌격! 커틀러스(1번) 장착 후 클릭/탭", 4)
 		play(0.45, 1)
 		shake(1.5, 0.5)
 	elseif data.type == "crewHit" then
-		floater(data.pos + Vector3.new(0, 3.5, 0), "-35", Color3.fromRGB(255, 220, 120))
-		ping(0.55 + math.random() * 0.2, 0.5)
+		if data.ally then
+			ping(0.45 + math.random() * 0.15, 0.25) -- 아군 교전음 (은은하게)
+		else
+			floater(data.pos + Vector3.new(0, 3.5, 0), "-35", Color3.fromRGB(255, 220, 120))
+			ping(0.55 + math.random() * 0.2, 0.5)
+		end
 	elseif data.type == "phase2" then
 		phaseXTarget = 210
 		FIRE_CD = 1.2

@@ -318,7 +318,40 @@ end
 -- 주의: 3막 오브젝트는 적함의 '시각적' 위치(X≈39)에 스폰 —
 -- 플레이어 물리는 클라이언트에서 돌므로 클라가 옮겨둔 갑판 위를 걸을 수 있다.
 --------------------------------------------------------------------
-local crews = {}
+local crews = {}   -- 적 선원
+local allies = {}  -- 아군 선원 (같이 도선해서 싸움 — 해적 놀이의 핵심)
+
+local function makeCrewman(parent, pos, bodyColor, headColor, hp)
+	local m = Instance.new("Model")
+	local root = part({ Name = "Body", Size = Vector3.new(2.4, 5, 1.6),
+		CFrame = CFrame.new(pos), Color = bodyColor, Material = Enum.Material.SmoothPlastic }, m)
+	part({ Name = "Head", Shape = Enum.PartType.Ball, Size = Vector3.new(1.8, 1.8, 1.8),
+		CFrame = root.CFrame * CFrame.new(0, 3.3, 0),
+		Color = headColor, Material = Enum.Material.SmoothPlastic, CanCollide = false }, m)
+	local bb = Instance.new("BillboardGui")
+	bb.Size = UDim2.fromScale(4, 0.9); bb.StudsOffset = Vector3.new(0, 3.4, 0); bb.AlwaysOnTop = true
+	bb.Parent = root
+	local hpBar = Instance.new("Frame")
+	hpBar.Size = UDim2.fromScale(1, 0.4); hpBar.Position = UDim2.fromScale(0, 0.3)
+	hpBar.BackgroundColor3 = headColor; hpBar.Parent = bb
+	m.Parent = parent
+	return { model = m, root = root, hp = hp, maxhp = hp, lastAtk = 0, alive = true, bar = hpBar }
+end
+
+local function downCrewman(rec)
+	rec.alive = false
+	local m = rec.model
+	task.spawn(function()
+		for k = 1, 10 do
+			m:PivotTo(m:GetPivot() * CFrame.new(0, -0.3, 0) * CFrame.Angles(0.1, 0, 0.05))
+			for _, p in m:GetDescendants() do
+				if p:IsA("BasePart") then p.Transparency = k / 10; p.CanCollide = false end
+			end
+			task.wait(0.05)
+		end
+		m:Destroy()
+	end)
+end
 
 local function startBoarding()
 	if not battleActive or sunk then return end
@@ -334,22 +367,18 @@ local function startBoarding()
 	end
 	table.clear(crews)
 	for i = 1, 4 do
-		local m = Instance.new("Model")
-		m.Name = "BCrew" .. i
-		local root = part({ Name = "Body", Size = Vector3.new(2.4, 5, 1.6),
-			CFrame = CFrame.new(ex - 4 + (i % 2) * 8, 13.4, -18 + i * 8),
-			Color = Color3.fromRGB(165, 120, 95), Material = Enum.Material.SmoothPlastic }, m)
-		part({ Name = "Head", Shape = Enum.PartType.Ball, Size = Vector3.new(1.8, 1.8, 1.8),
-			CFrame = root.CFrame * CFrame.new(0, 3.3, 0),
-			Color = Color3.fromRGB(255, 90, 80), Material = Enum.Material.SmoothPlastic, CanCollide = false }, m)
-		local bb = Instance.new("BillboardGui")
-		bb.Size = UDim2.fromScale(4, 0.9); bb.StudsOffset = Vector3.new(0, 3.4, 0); bb.AlwaysOnTop = true
-		bb.Parent = root
-		local hpBar = Instance.new("Frame")
-		hpBar.Size = UDim2.fromScale(1, 0.4); hpBar.Position = UDim2.fromScale(0, 0.3)
-		hpBar.BackgroundColor3 = Color3.fromRGB(230, 70, 60); hpBar.Parent = bb
-		m.Parent = boardFolder
-		crews[i] = { model = m, root = root, hp = 80, lastAtk = 0, alive = true, bar = hpBar }
+		crews[i] = makeCrewman(boardFolder,
+			Vector3.new(ex - 4 + (i % 2) * 8, 13.4, -18 + i * 8),
+			Color3.fromRGB(165, 120, 95), Color3.fromRGB(255, 90, 80), 80)
+		crews[i].model.Name = "BCrew" .. i
+	end
+	-- 아군 선원 3명: 내 갑판에서 같이 도선 (홀드 역할 — 결정타는 플레이어)
+	table.clear(allies)
+	for i = 1, 3 do
+		allies[i] = makeCrewman(boardFolder,
+			Vector3.new(6, 11, -14 + i * 12),
+			Color3.fromRGB(90, 120, 170), Color3.fromRGB(90, 190, 255), 100)
+		allies[i].model.Name = "Ally" .. i
 	end
 end
 
@@ -361,34 +390,80 @@ local function crewAlive()
 	return n
 end
 
--- 선원 AI 스테퍼
+-- 선원 AI 스테퍼 (적·아군 공용 — 서로 교전)
+local function stepTo(rec, targetPos, speed)
+	local dir = (targetPos - rec.root.Position) * Vector3.new(1, 0, 1)
+	if dir.Magnitude > 0.1 then
+		rec.model:PivotTo(CFrame.lookAt(rec.root.Position + dir.Unit * (speed / 15),
+			rec.root.Position + dir.Unit * 10))
+	end
+end
+
 task.spawn(function()
 	while true do
 		task.wait(1 / 15)
 		if not battleActive or sunk or phase.Value ~= 3 or not boardFolder then continue end
 		local now = os.clock()
+
+		-- 적 선원: 가장 가까운 표적(플레이어 or 아군 선원)을 추격
 		for _, rec in crews do
 			if rec.alive and rec.root.Parent then
-				local best, bestD = nil, math.huge
+				local best, bestD, bestKind = nil, math.huge, nil
 				for _, plr in Players:GetPlayers() do
 					local hrp = plr.Character and plr.Character:FindFirstChild("HumanoidRootPart")
 					local hum = plr.Character and plr.Character:FindFirstChildOfClass("Humanoid")
 					if hrp and hum and hum.Health > 0 then
 						local d = (hrp.Position - rec.root.Position).Magnitude
-						if d < bestD then best, bestD = hrp, d end
+						if d < bestD then best, bestD, bestKind = hrp, d, "player" end
+					end
+				end
+				for _, al in allies do
+					if al.alive then
+						local d = (al.root.Position - rec.root.Position).Magnitude
+						if d < bestD then best, bestD, bestKind = al, d, "ally" end
+					end
+				end
+				if best then
+					local pos = bestKind == "player" and best.Position or best.root.Position
+					if bestD > 5 then
+						stepTo(rec, pos, 9.5)
+					elseif now - rec.lastAtk > 1.4 then
+						rec.lastAtk = now
+						if bestKind == "player" then
+							local hum = best.Parent and best.Parent:FindFirstChildOfClass("Humanoid")
+							if hum then hum:TakeDamage(10) end
+						else
+							best.hp -= 12
+							best.bar.Size = UDim2.fromScale(math.max(0, best.hp / best.maxhp), 0.4)
+							if best.hp <= 0 then downCrewman(best) end
+						end
+					end
+				end
+			end
+		end
+
+		-- 아군 선원: 가장 가까운 적 선원과 교전 (홀드 + 보조딜 8)
+		for _, al in allies do
+			if al.alive and al.root.Parent then
+				local best, bestD = nil, math.huge
+				for _, rec in crews do
+					if rec.alive then
+						local d = (rec.root.Position - al.root.Position).Magnitude
+						if d < bestD then best, bestD = rec, d end
 					end
 				end
 				if best then
 					if bestD > 5 then
-						local dir = (best.Position - rec.root.Position) * Vector3.new(1, 0, 1)
-						if dir.Magnitude > 0.1 then
-							rec.model:PivotTo(CFrame.lookAt(rec.root.Position + dir.Unit * (9.5 / 15),
-								rec.root.Position + dir.Unit * 10))
+						stepTo(al, best.root.Position, 8.5)
+					elseif now - al.lastAtk > 1.6 then
+						al.lastAtk = now
+						best.hp -= 8
+						best.bar.Size = UDim2.fromScale(math.max(0, best.hp / best.maxhp), 0.4)
+						RE_Battle:FireAllClients({ type = "crewHit", pos = best.root.Position, ally = true })
+						if best.hp <= 0 then
+							downCrewman(best)
+							if crewAlive() == 0 then winStage(true) end
 						end
-					elseif now - rec.lastAtk > 1.4 then
-						rec.lastAtk = now
-						local hum = best.Parent and best.Parent:FindFirstChildOfClass("Humanoid")
-						if hum then hum:TakeDamage(10) end
 					end
 				end
 			end
@@ -409,21 +484,10 @@ RE_Swing.OnServerEvent:Connect(function(player)
 			local off = rec.root.Position - hrp.Position
 			if off.Magnitude <= 10 and off.Unit:Dot(hrp.CFrame.LookVector) >= 0.35 then
 				rec.hp -= 35
-				rec.bar.Size = UDim2.fromScale(math.max(0, rec.hp / 80), 0.4)
+				rec.bar.Size = UDim2.fromScale(math.max(0, rec.hp / rec.maxhp), 0.4)
 				RE_Battle:FireAllClients({ type = "crewHit", pos = rec.root.Position })
 				if rec.hp <= 0 then
-					rec.alive = false
-					local m = rec.model
-					task.spawn(function()
-						for k = 1, 10 do
-							m:PivotTo(m:GetPivot() * CFrame.new(0, -0.3, 0) * CFrame.Angles(0.1, 0, 0.05))
-							for _, p in m:GetDescendants() do
-								if p:IsA("BasePart") then p.Transparency = k / 10; p.CanCollide = false end
-							end
-							task.wait(0.05)
-						end
-						m:Destroy()
-					end)
+					downCrewman(rec)
 					if crewAlive() == 0 then winStage(true) end
 				end
 			end
