@@ -18,7 +18,8 @@
 | [`top20-complaints-opportunity.md`](./top20-complaints-opportunity.md) | 톱20 게임별 반복 유저 불만 리서치, 12개 공통 불만 테마, 불만을 차별화로 뒤집는 설계 결정 |
 | [`dopamine-hooks.md`](./dopamine-hooks.md) | "안달 엔진" 10종 — 기대 도파민 기반 갈망 훅 카탈로그 + 우선순위/가드레일 |
 | [`plus1-hypercasual-analysis.md`](./plus1-hypercasual-analysis.md) | +1 Speed Keyboard Escape 해부 — 게임 형태·과금 사다리·매출 추정, 8요소 공식 템플릿, 7일 스프린트 |
-| [**`game/`**](./game/) | 🫧 **+1 Pop! 뽁뽁이 탈출 — 실제 플레이 가능한 v0.1 코드+place 파일** (Studio에서 바로 열림) |
+| [**`game/`**](./game/) | 🫧 **+1 Pop! 뽁뽁이 탈출 — 실제 플레이 가능한 v0.3 코드+place 파일** (Studio에서 바로 열림) |
+| [**`naval/`**](./naval/) | ⚓ **해상전 프로젝트** — 마스터 기획서 + 스파이크 3종 + **v0.1 «포격전» 플레이 가능 빌드**(3막 풀 사이클·해도·별·조선소·선술집 가챠) |
 
 ## 지금 바로 시작하려면
 
