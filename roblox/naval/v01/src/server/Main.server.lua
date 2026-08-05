@@ -76,6 +76,8 @@ local hpHull = mkInt("HullHP", 0)
 local hpDeck = mkInt("DeckHP", 0)
 local shipHP = mkInt("ShipHP", CONFIG.ShipHP)
 local curStage = mkInt("Stage", 0) -- 0 = 해도 화면
+local phase = mkInt("Phase", 1)    -- 1 = 원거리 포격전, 2 = 중거리 총격전
+local RE_Cut = mkRemote("CutGrapple")
 
 --------------------------------------------------------------------
 -- 월드 생성
@@ -267,7 +269,8 @@ RE_Fire.OnServerEvent:Connect(function(player, aimPos)
 	if sunk or not battleActive then return end
 	if typeof(aimPos) ~= "Vector3" then return end
 	local now = os.clock()
-	if lastFire[player] and now - lastFire[player] < CONFIG.FireCooldown - 0.15 then return end
+	local cd = phase.Value == 2 and 1.2 or CONFIG.FireCooldown
+	if lastFire[player] and now - lastFire[player] < cd - 0.15 then return end
 	lastFire[player] = now
 	-- 조준점 새니티: 적함 근방만 허용
 	if (aimPos - Vector3.new(330, 12, 0)).Magnitude > 140 then return end
@@ -276,6 +279,10 @@ RE_Fire.OnServerEvent:Connect(function(player, aimPos)
 	local upg = pf and pf.upg or { cannon = 0, armor = 0, aim = 0 }
 	local shotCount = CONFIG.CannonCount + upg.cannon
 	local spread = CONFIG.ShotSpread - upg.aim * 1.75
+	if phase.Value == 2 then
+		shotCount = 1        -- 2막: 선회포 단발 (빠른 연사, 저격)
+		spread = 2.5
+	end
 
 	local shots = {}
 	for i = 1, shotCount do
@@ -292,6 +299,10 @@ RE_Fire.OnServerEvent:Connect(function(player, aimPos)
 			shot.to = hit.Position
 			shot.seg = segName
 			shot.dmg = CONFIG.ShotDamage
+			if phase.Value == 2 then
+				-- 선회포: 대인 저격 특화 (갑판 40 / 선체 25 / 돛 15)
+				shot.dmg = segName == "Deck" and 40 or (segName == "Hull" and 25 or 15)
+			end
 			if segName == "Sail" and hpSail.Value > 0 then
 				hpSail.Value = math.max(0, hpSail.Value - shot.dmg)
 			elseif segName == "Deck" and hpDeck.Value > 0 then
@@ -310,6 +321,13 @@ RE_Fire.OnServerEvent:Connect(function(player, aimPos)
 		table.insert(shots, shot)
 	end
 	RE_FireResult:FireAllClients({ shooter = player.Name, shots = shots })
+
+	-- 1막 → 2막 전환: 적 선체 50% 붕괴 시 접근전
+	if phase.Value == 1 and battleActive and not sunk
+		and hpHull.Value <= math.floor(stageCfg.hp.Hull * 0.5) and hpHull.Value > 0 then
+		phase.Value = 2
+		RE_Battle:FireAllClients({ type = "phase2" })
+	end
 
 	-- 격침 = 스테이지 승리
 	if hpHull.Value <= 0 and not sunk then
@@ -432,6 +450,7 @@ RE_Select.OnServerEvent:Connect(function(player, stageId)
 
 	stageCfg = cfg
 	curStage.Value = stageId
+	phase.Value = 1
 	sunk = false
 	hpSail.Value = cfg.hp.Sail
 	hpHull.Value = cfg.hp.Hull
@@ -448,6 +467,51 @@ RE_Select.OnServerEvent:Connect(function(player, stageId)
 		RE_Game:FireAllClients({ type = "respawn" })
 	end)
 	-- 첫 일제사격 유예: 루프가 0.5s 폴링이므로 firstDelay는 클라 안내용 + 인터벌 하한으로 보장
+end)
+
+--------------------------------------------------------------------
+-- 2막: 갈고리 러시 (차단 못 하면 선체 피해)
+--------------------------------------------------------------------
+local grapples = {}   -- [id] = true (활성)
+local grappleId = 0
+
+local function shipDefeat()
+	battleActive = false
+	RE_Game:FireAllClients({ type = "defeat" })
+	task.delay(4, function()
+		curStage.Value = 0
+		RE_Battle:FireAllClients({ type = "lose", stage = stageCfg and stageCfg.id or 0 })
+	end)
+end
+
+task.spawn(function()
+	while true do
+		task.wait(1)
+		if not battleActive or sunk or phase.Value ~= 2 then continue end
+		task.wait(math.random(4, 7))
+		if not battleActive or sunk or phase.Value ~= 2 then continue end
+		grappleId += 1
+		local id = grappleId
+		grapples[id] = true
+		local z = math.random(-20, 20)
+		RE_Battle:FireAllClients({ type = "grapple", id = id, z = z })
+		task.delay(2.6, function()
+			if grapples[id] then
+				grapples[id] = nil
+				shipHP.Value = math.max(0, shipHP.Value - 120)
+				RE_Battle:FireAllClients({ type = "grappleHit", id = id, shipHP = shipHP.Value })
+				if shipHP.Value <= 0 and battleActive then shipDefeat() end
+			end
+		end)
+	end
+end)
+
+RE_Cut.OnServerEvent:Connect(function(player, id)
+	id = tonumber(id)
+	if id and grapples[id] then
+		grapples[id] = nil
+		RE_Battle:FireAllClients({ type = "grappleCut", id = id, by = player.Name })
+	end
 end)
 
 -- 조선소 구매 (서버 권위)

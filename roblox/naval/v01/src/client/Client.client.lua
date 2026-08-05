@@ -28,6 +28,7 @@ local RE_Game = remotes:WaitForChild("GameEvent")
 local RE_Select = remotes:WaitForChild("SelectStage")
 local RE_Battle = remotes:WaitForChild("BattleEvent")
 local RE_Shop = remotes:WaitForChild("Shop")
+local RE_Cut = remotes:WaitForChild("CutGrapple")
 
 local bs = ReplicatedStorage:WaitForChild("BattleState")
 local hpSail = bs:WaitForChild("SailHP")
@@ -92,6 +93,7 @@ for _, p in foam:GetChildren() do
 end
 local ENEMY_CENTER = CFrame.new(330, 6, 0)
 local sinkStart = nil -- os.clock (침몰 연출)
+local phaseX, phaseXTarget = 0, 0 -- 2막 접근 오프셋 (330 → 120)
 
 local shakeAmp, shakeUntil = 0, 0
 local function shake(amp, dur)
@@ -116,7 +118,12 @@ RunService.RenderStepped:Connect(function()
 		local a = math.clamp((os.clock() - sinkStart) / 4.5, 0, 1)
 		bob = CFrame.new(0, -24 * a * a, 0) * CFrame.Angles(0, 0, math.rad(28) * a) * bob
 	end
-	local xf = ENEMY_CENTER * bob * ENEMY_CENTER:Inverse()
+	-- 2막 접근: 적함이 미끄러져 들어옴
+	if phaseX ~= phaseXTarget then
+		local dir = phaseXTarget > phaseX and 1 or -1
+		phaseX = math.clamp(phaseX + dir * 70 / 60, math.min(phaseX, phaseXTarget), math.max(phaseX, phaseXTarget))
+	end
+	local xf = CFrame.new(-phaseX, 0, 0) * ENEMY_CENTER * bob * ENEMY_CENTER:Inverse()
 	for p, base in enemyBase do
 		if p.Parent then p.CFrame = xf * base end
 	end
@@ -334,13 +341,14 @@ UserInputService.InputBegan:Connect(function(input, processed)
 end)
 
 -- 쿨다운 표시
+local fireLabel = "💥 일제사격"
 RunService.Heartbeat:Connect(function()
 	local left = FIRE_CD - (os.clock() - lastFireAt)
 	if left > 0 then
 		fireBtn.Text = ("재장전 %.1f"):format(left)
 		fireBtn.BackgroundColor3 = Color3.fromRGB(120, 84, 74)
 	else
-		fireBtn.Text = "💥 일제사격"
+		fireBtn.Text = fireLabel
 		fireBtn.BackgroundColor3 = Color3.fromRGB(226, 92, 62)
 	end
 end)
@@ -691,8 +699,96 @@ backBtn.Activated:Connect(function()
 	refreshChart()
 end)
 
+-- 2막: 갈고리 UI (탭/클릭 or 절단 버튼)
+local hooks = {} -- [id] = part
+local cutBtn = Instance.new("TextButton")
+cutBtn.AnchorPoint = Vector2.new(0.5, 1)
+cutBtn.Position = UDim2.new(0.5, 0, 1, -14)
+cutBtn.Size = UDim2.fromOffset(190, 58)
+cutBtn.Font = Enum.Font.FredokaOne
+cutBtn.TextScaled = true
+cutBtn.Text = "🪓 밧줄 절단!!"
+cutBtn.TextColor3 = Color3.new(1, 1, 1)
+cutBtn.BackgroundColor3 = Color3.fromRGB(255, 140, 40)
+cutBtn.Visible = false
+cutBtn.Parent = gui
+local cbc = Instance.new("UICorner"); cbc.CornerRadius = UDim.new(0, 14); cbc.Parent = cutBtn
+
+local function oldestHook()
+	local minId = nil
+	for id in hooks do
+		if not minId or id < minId then minId = id end
+	end
+	return minId
+end
+cutBtn.Activated:Connect(function()
+	local id = oldestHook()
+	if id then RE_Cut:FireServer(id) end
+end)
+
+local function removeHook(id)
+	local h = hooks[id]
+	if h then h:Destroy(); hooks[id] = nil end
+	cutBtn.Visible = next(hooks) ~= nil
+end
+
+local function spawnHook(id, z)
+	local hook = Instance.new("Part")
+	hook.Shape = Enum.PartType.Ball
+	hook.Size = Vector3.new(2, 2, 2)
+	hook.Color = Color3.fromRGB(255, 80, 60)
+	hook.Material = Enum.Material.Neon
+	hook.Anchored = true; hook.CanCollide = false
+	hook.Position = Vector3.new(12.4, 10.8, z)
+	hook.Parent = workspace
+	local bb = Instance.new("BillboardGui")
+	bb.Size = UDim2.fromScale(7, 2); bb.StudsOffset = Vector3.new(0, 2.4, 0); bb.AlwaysOnTop = true
+	bb.Parent = hook
+	label({ Size = UDim2.fromScale(1, 1), Text = "🪝 갈고리! 절단하라", TextColor3 = Color3.fromRGB(255, 120, 100) }, bb)
+	hooks[id] = hook
+	cutBtn.Visible = true
+	ping(0.45, 0.9)
+end
+
+-- 갈고리 직접 클릭/탭 절단
+UserInputService.InputBegan:Connect(function(input, processed)
+	if processed then return end
+	if input.UserInputType == Enum.UserInputType.MouseButton1
+		or input.UserInputType == Enum.UserInputType.Touch then
+		local list = {}
+		for _, h in hooks do table.insert(list, h) end
+		if #list == 0 then return end
+		local params = RaycastParams.new()
+		params.FilterType = Enum.RaycastFilterType.Include
+		params.FilterDescendantsInstances = list
+		local ray = camera:ViewportPointToRay(input.Position.X, input.Position.Y)
+		local hit = workspace:Raycast(ray.Origin, ray.Direction * 300, params)
+		if hit then
+			for id, h in hooks do
+				if h == hit.Instance then RE_Cut:FireServer(id) break end
+			end
+		end
+	end
+end)
+
 RE_Battle.OnClientEvent:Connect(function(data)
-	if data.type == "profile" then
+	if data.type == "phase2" then
+		phaseXTarget = 210
+		FIRE_CD = 1.2
+		fireLabel = "🎯 선회포"
+		showBanner("⚡ 2막 — 총격전!", "적함 접근! 선회포로 선원 저격 · 갈고리를 잘라라", 3)
+		play(0.5, 0.9)
+	elseif data.type == "grapple" then
+		spawnHook(data.id, data.z)
+	elseif data.type == "grappleCut" then
+		removeHook(data.id)
+		floater(Vector3.new(12, 12, 0), "✂️ 절단!", Color3.fromRGB(140, 255, 170))
+		ping(1.1, 0.7)
+	elseif data.type == "grappleHit" then
+		removeHook(data.id)
+		shake(2.2, 0.5)
+		showBanner("🪝 갈고리 적중!", "−120 선체 — 다음 갈고리는 잘라내세요", 1.8)
+	elseif data.type == "profile" then
 		mySilver = data.silver or 0
 		if type(data.stars) == "table" then
 			for i = 1, 3 do myStars[i] = data.stars[i] or 0 end
@@ -705,6 +801,11 @@ RE_Battle.OnClientEvent:Connect(function(data)
 	elseif data.type == "countdown" then
 		chart.Visible = false
 		winPanel.Visible = false
+		phaseXTarget = 0
+		phaseX = 0
+		FIRE_CD = 6.0
+		fireLabel = "💥 일제사격"
+		for id in hooks do removeHook(id) end
 		MAX_SAIL = math.max(1, data.max.sail)
 		MAX_HULL = math.max(1, data.max.hull)
 		MAX_DECK = math.max(1, data.max.deck)
