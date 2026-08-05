@@ -27,6 +27,7 @@ local RE_Brace = remotes:WaitForChild("Brace")
 local RE_Game = remotes:WaitForChild("GameEvent")
 local RE_Select = remotes:WaitForChild("SelectStage")
 local RE_Battle = remotes:WaitForChild("BattleEvent")
+local RE_Shop = remotes:WaitForChild("Shop")
 
 local bs = ReplicatedStorage:WaitForChild("BattleState")
 local hpSail = bs:WaitForChild("SailHP")
@@ -46,6 +47,15 @@ local STAGE_INFO = {
 }
 local myStars = { 0, 0, 0 }
 local mySilver = 0
+local myUpg = { cannon = 0, armor = 0, aim = 0 }
+local UPG_INFO = {
+	{ key = "cannon", icon = "💥", name = "포문 확장", costs = { 300, 800, 1800 },
+		fx = { "4발", "5발", "6발", "7발" } },
+	{ key = "armor", icon = "🛡️", name = "장갑판", costs = { 250, 700, 1600 },
+		fx = { "피격 100%", "88%", "78%", "70%" } },
+	{ key = "aim", icon = "🎯", name = "조준 보조", costs = { 200, 600, 1400 },
+		fx = { "산포 9.0", "7.25", "5.5", "3.75" } },
+}
 
 --------------------------------------------------------------------
 -- 사운드 (내장 에셋 — 본편에서 실제 SFX로 교체)
@@ -551,6 +561,102 @@ local function refreshChart()
 end
 refreshChart()
 
+-- 조선소 (은화 상점) — 해도 위 패널
+local shopBtn = Instance.new("TextButton")
+shopBtn.AnchorPoint = Vector2.new(0.5, 1)
+shopBtn.Position = UDim2.new(0.5, 0, 0.92, 0)
+shopBtn.Size = UDim2.new(0.4, 0, 0.06, 0)
+shopBtn.Font = Enum.Font.FredokaOne
+shopBtn.TextScaled = true
+shopBtn.Text = "🛠️ 조선소"
+shopBtn.TextColor3 = Color3.new(1, 1, 1)
+shopBtn.BackgroundColor3 = Color3.fromRGB(120, 90, 50)
+shopBtn.ZIndex = 11
+shopBtn.Parent = chart
+local sbc = Instance.new("UICorner"); sbc.CornerRadius = UDim.new(0, 12); sbc.Parent = shopBtn
+
+local shop = Instance.new("Frame")
+shop.AnchorPoint = Vector2.new(0.5, 0.5)
+shop.Position = UDim2.fromScale(0.5, 0.5)
+shop.Size = UDim2.new(0.78, 0, 0.6, 0)
+shop.BackgroundColor3 = Color3.fromRGB(26, 34, 58)
+shop.Visible = false
+shop.ZIndex = 15
+shop.Parent = gui
+local shc = Instance.new("UICorner"); shc.CornerRadius = UDim.new(0, 16); shc.Parent = shop
+label({ Position = UDim2.new(0, 0, 0.03, 0), Size = UDim2.new(1, 0, 0.12, 0),
+	Text = "🛠️ 조선소 — 은화로 함선 강화", ZIndex = 16,
+	TextColor3 = Color3.fromRGB(255, 230, 150) }, shop)
+local shopSilver = label({ Position = UDim2.new(0, 0, 0.15, 0), Size = UDim2.new(1, 0, 0.08, 0),
+	Text = "🪙 0", ZIndex = 16 }, shop)
+
+local shopRows = {}
+for i, info in UPG_INFO do
+	local row = Instance.new("Frame")
+	row.Position = UDim2.new(0.05, 0, 0.24 + (i - 1) * 0.21, 0)
+	row.Size = UDim2.new(0.9, 0, 0.18, 0)
+	row.BackgroundColor3 = Color3.fromRGB(38, 48, 78)
+	row.ZIndex = 16
+	row.Parent = shop
+	local rc = Instance.new("UICorner"); rc.CornerRadius = UDim.new(0, 10); rc.Parent = row
+	local nameL = label({ Position = UDim2.new(0.03, 0, 0.08, 0), Size = UDim2.new(0.55, 0, 0.44, 0),
+		Text = "", TextXAlignment = Enum.TextXAlignment.Left, ZIndex = 17 }, row)
+	local fxL = label({ Position = UDim2.new(0.03, 0, 0.54, 0), Size = UDim2.new(0.55, 0, 0.36, 0),
+		Text = "", TextXAlignment = Enum.TextXAlignment.Left, ZIndex = 17, TextTransparency = 0.2 }, row)
+	local buy = Instance.new("TextButton")
+	buy.AnchorPoint = Vector2.new(1, 0.5)
+	buy.Position = UDim2.new(0.97, 0, 0.5, 0)
+	buy.Size = UDim2.new(0.32, 0, 0.7, 0)
+	buy.Font = Enum.Font.FredokaOne
+	buy.TextScaled = true
+	buy.TextColor3 = Color3.new(1, 1, 1)
+	buy.BackgroundColor3 = Color3.fromRGB(70, 160, 100)
+	buy.ZIndex = 17
+	buy.Parent = row
+	local bc = Instance.new("UICorner"); bc.CornerRadius = UDim.new(0, 10); bc.Parent = buy
+	buy.Activated:Connect(function() RE_Shop:FireServer(info.key) end)
+	shopRows[i] = { name = nameL, fx = fxL, buy = buy }
+end
+
+local shopClose = Instance.new("TextButton")
+shopClose.AnchorPoint = Vector2.new(0.5, 1)
+shopClose.Position = UDim2.new(0.5, 0, 0.96, 0)
+shopClose.Size = UDim2.new(0.3, 0, 0.1, 0)
+shopClose.Font = Enum.Font.FredokaOne
+shopClose.TextScaled = true
+shopClose.Text = "닫기"
+shopClose.TextColor3 = Color3.new(1, 1, 1)
+shopClose.BackgroundColor3 = Color3.fromRGB(90, 100, 130)
+shopClose.ZIndex = 16
+shopClose.Parent = shop
+local scc = Instance.new("UICorner"); scc.CornerRadius = UDim.new(0, 10); scc.Parent = shopClose
+
+local function refreshShop()
+	shopSilver.Text = ("🪙 %d"):format(mySilver)
+	for i, info in UPG_INFO do
+		local tier = myUpg[info.key] or 0
+		local row = shopRows[i]
+		row.name.Text = ("%s %s  %s%s"):format(info.icon, info.name,
+			string.rep("●", tier), string.rep("○", 3 - tier))
+		if tier >= 3 then
+			row.fx.Text = "현재: " .. info.fx[4] .. " (최대)"
+			row.buy.Text = "MAX"
+			row.buy.BackgroundColor3 = Color3.fromRGB(80, 86, 105)
+		else
+			row.fx.Text = ("현재: %s → 다음: %s"):format(info.fx[tier + 1], info.fx[tier + 2])
+			local cost = info.costs[tier + 1]
+			row.buy.Text = ("🪙 %d"):format(cost)
+			row.buy.BackgroundColor3 = mySilver >= cost
+				and Color3.fromRGB(70, 160, 100) or Color3.fromRGB(120, 70, 60)
+		end
+	end
+end
+shopBtn.Activated:Connect(function()
+	shop.Visible = not shop.Visible
+	refreshShop()
+end)
+shopClose.Activated:Connect(function() shop.Visible = false end)
+
 -- 승리 패널
 local winPanel = Instance.new("Frame")
 winPanel.AnchorPoint = Vector2.new(0.5, 0.5)
@@ -591,7 +697,11 @@ RE_Battle.OnClientEvent:Connect(function(data)
 		if type(data.stars) == "table" then
 			for i = 1, 3 do myStars[i] = data.stars[i] or 0 end
 		end
+		if type(data.upg) == "table" then
+			for k in myUpg do myUpg[k] = data.upg[k] or 0 end
+		end
 		refreshChart()
+		refreshShop()
 	elseif data.type == "countdown" then
 		chart.Visible = false
 		winPanel.Visible = false

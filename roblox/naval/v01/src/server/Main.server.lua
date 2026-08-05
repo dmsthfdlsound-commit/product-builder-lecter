@@ -50,6 +50,15 @@ local RE_Brace = mkRemote("Brace")
 local RE_Game = mkRemote("GameEvent")
 local RE_Select = mkRemote("SelectStage")
 local RE_Battle = mkRemote("BattleEvent")
+local RE_Shop = mkRemote("Shop")
+
+-- 조선소 업그레이드 (성능은 은화로만 — 치장만 로벅스 원칙)
+local UPGRADES = {
+	cannon = { name = "포문 확장", costs = { 300, 800, 1800 } },  -- 일제사격 +1발/티어
+	armor  = { name = "장갑판",   costs = { 250, 700, 1600 } },  -- 피격 ×0.88/0.78/0.70
+	aim    = { name = "조준 보조", costs = { 200, 600, 1400 } },  -- 산포 9→7.25→5.5→3.75
+}
+local ARMOR_FACTOR = { [0] = 1.0, 0.88, 0.78, 0.70 }
 
 -- 상태 (클라 HUD가 구독)
 local state = Instance.new("Folder")
@@ -198,25 +207,31 @@ local profiles = {} -- [player] = { silver = n, stars = {0,0,0} }
 
 local function pushProfile(player)
 	local pf = profiles[player]
-	if pf then RE_Battle:FireClient(player, { type = "profile", silver = pf.silver, stars = pf.stars }) end
+	if pf then
+		RE_Battle:FireClient(player, { type = "profile",
+			silver = pf.silver, stars = pf.stars, upg = pf.upg })
+	end
 end
 
 local function saveProfile(player)
 	local pf = profiles[player]
 	if not (store and pf) then return end
 	pcall(function()
-		store:SetAsync("p_" .. player.UserId, { silver = pf.silver, stars = pf.stars })
+		store:SetAsync("p_" .. player.UserId, { silver = pf.silver, stars = pf.stars, upg = pf.upg })
 	end)
 end
 
 Players.PlayerAdded:Connect(function(player)
-	local pf = { silver = 0, stars = { 0, 0, 0 } }
+	local pf = { silver = 0, stars = { 0, 0, 0 }, upg = { cannon = 0, armor = 0, aim = 0 } }
 	if store then
 		local ok, saved = pcall(function() return store:GetAsync("p_" .. player.UserId) end)
 		if ok and type(saved) == "table" then
 			pf.silver = tonumber(saved.silver) or 0
 			if type(saved.stars) == "table" then
 				for i = 1, 3 do pf.stars[i] = tonumber(saved.stars[i]) or 0 end
+			end
+			if type(saved.upg) == "table" then
+				for k in pf.upg do pf.upg[k] = math.clamp(tonumber(saved.upg[k]) or 0, 0, 3) end
 			end
 		end
 	end
@@ -257,13 +272,18 @@ RE_Fire.OnServerEvent:Connect(function(player, aimPos)
 	-- 조준점 새니티: 적함 근방만 허용
 	if (aimPos - Vector3.new(330, 12, 0)).Magnitude > 140 then return end
 
+	local pf = profiles[player]
+	local upg = pf and pf.upg or { cannon = 0, armor = 0, aim = 0 }
+	local shotCount = CONFIG.CannonCount + upg.cannon
+	local spread = CONFIG.ShotSpread - upg.aim * 1.75
+
 	local shots = {}
-	for i = 1, CONFIG.CannonCount do
-		local from = muzzles[i]
+	for i = 1, shotCount do
+		local from = muzzles[(i - 1) % #muzzles + 1]
 		local target = aimPos + Vector3.new(
-			(math.random() - 0.5) * 2 * CONFIG.ShotSpread,
-			(math.random() - 0.5) * 2 * CONFIG.ShotSpread * 0.7,
-			(math.random() - 0.5) * 2 * CONFIG.ShotSpread)
+			(math.random() - 0.5) * 2 * spread,
+			(math.random() - 0.5) * 2 * spread * 0.7,
+			(math.random() - 0.5) * 2 * spread)
 		local dir = (target - from).Unit * 600
 		local hit = workspace:Raycast(from, dir, rayParams)
 		local shot = { from = from, to = target, seg = "Miss", dmg = 0 }
@@ -369,6 +389,13 @@ task.spawn(function()
 
 		local dmg = math.random(cfg.volley - 15, cfg.volley + 15)
 		if hpDeck.Value <= 0 then dmg = math.floor(dmg * 0.5) end -- 선원 제압 → 화력 반감
+		-- 장갑판: 접속자 중 최고 티어 적용 (협동 보너스)
+		local bestArmor = 0
+		for _, plr in Players:GetPlayers() do
+			local p = profiles[plr]
+			if p and p.upg.armor > bestArmor then bestArmor = p.upg.armor end
+		end
+		dmg = math.floor(dmg * ARMOR_FACTOR[bestArmor])
 		dmg = math.floor(dmg * bestFactor)
 		shipHP.Value = math.max(0, shipHP.Value - dmg)
 
@@ -421,6 +448,25 @@ RE_Select.OnServerEvent:Connect(function(player, stageId)
 		RE_Game:FireAllClients({ type = "respawn" })
 	end)
 	-- 첫 일제사격 유예: 루프가 0.5s 폴링이므로 firstDelay는 클라 안내용 + 인터벌 하한으로 보장
+end)
+
+-- 조선소 구매 (서버 권위)
+RE_Shop.OnServerEvent:Connect(function(player, line)
+	if battleActive then return end
+	local pf = profiles[player]
+	local def = UPGRADES[line]
+	if not (pf and def) then return end
+	local tier = pf.upg[line] or 0
+	if tier >= 3 then return end
+	local cost = def.costs[tier + 1]
+	if pf.silver < cost then return end
+	pf.silver -= cost
+	pf.upg[line] = tier + 1
+	local lv = player:FindFirstChild("leaderstats")
+	local sv = lv and lv:FindFirstChild("은화")
+	if sv then sv.Value = pf.silver end
+	saveProfile(player)
+	pushProfile(player)
 end)
 
 print("[NavalV01] 해도 대기 — 스테이지를 선택하세요")
