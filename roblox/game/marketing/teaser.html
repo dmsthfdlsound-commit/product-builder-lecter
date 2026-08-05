@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html><head><meta charset="utf-8">
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  html,body { width:540px; height:960px; overflow:hidden; background:#0b0e1e;
+    font-family:-apple-system,'Segoe UI',Roboto,'Noto Sans KR',sans-serif; }
+  #stage { position:relative; width:540px; height:960px; overflow:hidden; }
+  #bg { position:absolute; inset:0;
+    background:linear-gradient(160deg,#ffd6e7 0%,#cceeff 55%,#d6ffd6 100%); }
+  #cam { position:absolute; inset:0; will-change:transform; }
+  .bub { position:absolute; width:52px; height:52px; border-radius:50%;
+    background:radial-gradient(circle at 35% 30%, #ffffff 0%, #eef9ff 45%, #cfe9f7 100%);
+    box-shadow:0 3px 6px rgba(60,90,140,.18), inset 0 -4px 8px rgba(120,160,200,.25);
+    will-change:transform,opacity; }
+  .bub.popped { background:radial-gradient(circle at 40% 35%, #b9ffd9 0%, #6ee7a0 60%, #3ecf7d 100%);
+    box-shadow:0 2px 4px rgba(40,120,80,.3), 0 0 14px rgba(110,231,160,.65); }
+  .bub.flash { background:radial-gradient(circle, #ffffff 0%, #d2ffe6 100%);
+    box-shadow:0 0 22px rgba(255,255,255,.95), 0 0 34px rgba(110,231,160,.8); }
+  .flo { position:absolute; font-weight:900; font-size:35px; color:#17a34a;
+    text-shadow:0 2px 0 #fff,0 0 10px rgba(255,255,255,.9); opacity:0; will-change:transform,opacity; }
+  #counter { position:absolute; top:52px; width:100%; text-align:center; font-weight:900;
+    font-size:84px; color:#fff; -webkit-text-stroke:3px #3b6fc9;
+    text-shadow:0 6px 0 rgba(59,111,201,.45),0 0 26px rgba(255,255,255,.7); will-change:transform; }
+  #mult { position:absolute; top:150px; width:100%; text-align:center; font-weight:900;
+    font-size:34px; color:#ff9d00; text-shadow:0 2px 0 #fff; opacity:0; }
+  .line { position:absolute; top:-160px; width:5px; height:150px; border-radius:3px;
+    background:linear-gradient(#ffffff00,#ffffffcc); opacity:0; will-change:transform,opacity; }
+  #flash { position:absolute; inset:0; opacity:0;
+    background:radial-gradient(circle,#fff8dc 0%,#ffd34d 45%,#ff9d0000 78%); }
+  #rebirth { position:absolute; top:40%; width:100%; text-align:center; font-weight:900;
+    font-size:66px; color:#ffb300; -webkit-text-stroke:2.5px #7a4a00;
+    text-shadow:0 0 30px #fff,0 8px 0 rgba(122,74,0,.35); opacity:0; will-change:transform,opacity; }
+  #end { position:absolute; inset:0; background:linear-gradient(180deg,#101a3a 0%,#1b2c5e 100%);
+    opacity:0; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:18px; }
+  #end .logo { font-size:92px; font-weight:900; color:#fff; -webkit-text-stroke:3px #3b6fc9;
+    text-shadow:0 8px 0 rgba(59,111,201,.5); }
+  #end .name { font-size:44px; font-weight:900; color:#ffe27a; }
+  #end .tag  { font-size:24px; font-weight:700; color:#cfe0ff; }
+  #end .cta  { margin-top:14px; font-size:26px; font-weight:900; color:#0b0e1e;
+    background:#6ee7a0; padding:12px 34px; border-radius:999px; box-shadow:0 6px 0 #2f9e63; }
+  #end .chip { font-size:30px; font-weight:900; color:#fff; opacity:.9; }
+  .ring { position:absolute; border:6px solid #ffe27a; border-radius:50%;
+    opacity:0; will-change:transform,opacity; }
+</style></head>
+<body>
+<div id="stage">
+  <div id="bg"></div>
+  <div id="cam">
+    <div id="grid"></div>
+    <div id="lines"></div>
+    <div id="counter">⚡ 0</div>
+    <div id="mult">♻️ ×2</div>
+  </div>
+  <div id="flash"></div>
+  <div id="rebirth">♻️ 리버스! ×2</div>
+  <div id="end">
+    <div class="logo">🫧 +1 POP!</div>
+    <div class="name">뽁뽁이 탈출</div>
+    <div class="tag">매 걸음이 뽁 · Every Step Pops</div>
+    <div class="chip">⚡ <span id="final"></span> SPEED</div>
+    <div class="cta">Roblox · Coming Soon</div>
+    <div id="rings"></div>
+  </div>
+</div>
+<script>
+const S = __SCHEDULE__;
+const GX = 53, GY = 178, CELL = 62;
+const grid = document.getElementById('grid');
+const cam = document.getElementById('cam');
+const counterEl = document.getElementById('counter');
+const multEl = document.getElementById('mult');
+const flashEl = document.getElementById('flash');
+const rebEl = document.getElementById('rebirth');
+const endEl = document.getElementById('end');
+document.getElementById('final').textContent = S.finalCounter;
+
+// 버블 셀 생성
+const cells = [];
+for (let r = 0; r < S.rows; r++) {
+  cells[r] = [];
+  for (let c = 0; c < S.cols; c++) {
+    const d = document.createElement('div');
+    d.className = 'bub';
+    d.style.left = (GX + c * CELL + 5) + 'px';
+    d.style.top  = (GY + r * CELL + 5) + 'px';
+    grid.appendChild(d);
+    cells[r][c] = d;
+  }
+}
+// 셀별 팝 시각 목록
+const cellPops = {};
+for (const p of S.pops) {
+  const k = p.col + ',' + p.row;
+  (cellPops[k] = cellPops[k] || []).push(p.t);
+}
+// 플로터 (팝당 1개)
+const flos = S.pops.map(p => {
+  const f = document.createElement('div');
+  f.className = 'flo';
+  f.textContent = '+' + p.gain;
+  f.style.left = (GX + p.col * CELL + 8) + 'px';
+  grid.appendChild(f);
+  return f;
+});
+// 스피드 라인 12개
+const lines = [];
+for (let i = 0; i < 12; i++) {
+  const l = document.createElement('div');
+  l.className = 'line';
+  l.style.left = (20 + i * 44 + (i % 3) * 9) + 'px';
+  document.getElementById('lines').appendChild(l);
+  lines.push(l);
+}
+// 엔드카드 축포 링 3개
+const ringTs = [8.35, 8.7, 9.15];
+const rings = ringTs.map((t, i) => {
+  const g = document.createElement('div');
+  g.className = 'ring';
+  g.style.left = (110 + i * 140) + 'px';
+  g.style.top  = (240 + (i % 2) * 420) + 'px';
+  endEl.appendChild(g);
+  return g;
+});
+
+const clamp = (v,a,b) => Math.max(a, Math.min(b, v));
+const ease = x => 1 - Math.pow(1 - x, 3);
+
+window.setT = function(t) {
+  // 카메라: 점진 줌 + 흔들림
+  const zoom = 1 + 0.12 * ease(clamp(t / S.rebirthT, 0, 1));
+  let amp = 6 * clamp((t - 1.5) / (S.rebirthT - 1.5), 0, 1);
+  if (t > S.rebirthT && t < S.endcardT) amp = 8;
+  if (t >= S.endcardT) amp = 0;
+  const sx = Math.sin(t * 47) * amp, sy = Math.cos(t * 39) * amp * 0.7;
+  cam.style.transform = `translate(${sx}px,${sy}px) scale(${zoom})`;
+
+  // 배경 색상 순환
+  document.getElementById('bg').style.filter = `hue-rotate(${t * 14}deg)`;
+
+  // 버블 상태
+  for (let r = 0; r < S.rows; r++) for (let c = 0; c < S.cols; c++) {
+    const ts = cellPops[c + ',' + r];
+    let st = 1, mode = 'up'; // up | flash | popped
+    if (ts) for (const pt of ts) {
+      if (t >= pt && t < pt + 1.1) {
+        const a = t - pt;
+        if (a < 0.09) { st = 1.18 - 0.76 * (a / 0.09); mode = 'flash'; } // 팝 순간: 커졌다 눌림
+        else if (a < 0.85) { st = 0.42; mode = 'popped'; }               // 납작+민트
+        else { st = 0.42 + 0.58 * ((a - 0.85) / 0.25); mode = 'popped'; } // 복귀
+      }
+    }
+    const el = cells[r][c];
+    el.style.transform = `scale(${st})`;
+    el.style.opacity = 1;
+    el.className = 'bub' + (mode === 'up' ? '' : ' ' + mode);
+  }
+
+  // 플로터
+  for (let i = 0; i < S.pops.length; i++) {
+    const p = S.pops[i], f = flos[i], a = t - p.t;
+    if (a >= 0 && a < 0.55) {
+      f.style.opacity = 1 - (a / 0.55);
+      f.style.transform = `translateY(${GY + p.row * CELL - 6 - 52 * (a / 0.55)}px)`;
+      f.style.top = '0px';
+    } else f.style.opacity = 0;
+  }
+
+  // 카운터
+  let val = 0, lastPop = -9;
+  for (const p of S.pops) if (p.t <= t) { val = p.counter; lastPop = p.t; }
+  counterEl.textContent = '⚡ ' + val;
+  const pulse = clamp(1 - (t - lastPop) / 0.14, 0, 1);
+  counterEl.style.transform = `scale(${1 + 0.16 * pulse})`;
+  counterEl.style.color = pulse > 0.4 ? '#d6ffe3' : '#fff';
+  multEl.style.opacity = (t >= S.rebirthT && t < S.endcardT) ? 1 : 0;
+
+  // 스피드 라인
+  const lineA = clamp((t - 3.8) / 1.6, 0, 1) * (t < S.endcardT ? 1 : 0);
+  lines.forEach((l, i) => {
+    const speed = 900 + i * 120;
+    const y = ((t * speed + i * 173) % 1300) - 170;
+    l.style.transform = `translateY(${y}px)`;
+    l.style.opacity = lineA * 0.5;
+  });
+
+  // 리버스 연출
+  const ra = t - S.rebirthT;
+  flashEl.style.opacity = (ra >= 0 && ra < 0.5) ? (1 - ra / 0.5) : 0;
+  if (ra >= 0 && ra < 0.9) {
+    rebEl.style.opacity = ra < 0.65 ? 1 : 1 - (ra - 0.65) / 0.25;
+    rebEl.style.transform = `scale(${0.6 + 0.55 * ease(clamp(ra / 0.22, 0, 1))})`;
+  } else rebEl.style.opacity = 0;
+
+  // 엔드카드
+  const ea = t - S.endcardT;
+  endEl.style.opacity = clamp(ea / 0.3, 0, 1);
+  rings.forEach((g, i) => {
+    const a = t - ringTs[i];
+    if (a >= 0 && a < 0.7) {
+      const s = 20 + 260 * ease(a / 0.7);
+      g.style.width = g.style.height = s + 'px';
+      g.style.marginLeft = g.style.marginTop = (-s / 2) + 'px';
+      g.style.opacity = 0.9 * (1 - a / 0.7);
+    } else g.style.opacity = 0;
+  });
+};
+window.setT(0);
+window.ready = true;
+</script>
+</body></html>
