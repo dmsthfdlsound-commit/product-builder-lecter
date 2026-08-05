@@ -60,6 +60,54 @@ local UPGRADES = {
 }
 local ARMOR_FACTOR = { [0] = 1.0, 0.88, 0.78, 0.70 }
 
+--------------------------------------------------------------------
+-- 선술집 가챠 (은화 전용 — 로벅스 금지 = 확률규제 비대상 + 반가챠 포지션)
+-- 원칙: 확률 상시 공개, 천장 카운터 화면 노출, 중복은 훈련점수로 전환
+--------------------------------------------------------------------
+local GACHA_COST = 150
+local PITY_RARE = 20   -- 20회 안에 레어+ 보장
+local PITY_SR = 60     -- 60회 안에 SR 보장
+local ODDS = { C = 60, U = 27, R = 10, S = 3 }
+local TAVERN = {
+	{ id = "c1", r = "C", name = "갑판원 무초", skill = "도선 아군 체력 +15", fx = "allyHp", v = 15 },
+	{ id = "c2", r = "C", name = "요리사 뚱보 잭", skill = "도선 아군 체력 +15", fx = "allyHp", v = 15 },
+	{ id = "c3", r = "C", name = "견습 항해사 핀", skill = "아군 보조딜 +1", fx = "allyDmg", v = 1 },
+	{ id = "c4", r = "C", name = "노잡이 브람", skill = "아군 보조딜 +1", fx = "allyDmg", v = 1 },
+	{ id = "u1", r = "U", name = "정비공 그레타", skill = "포격 재장전 −0.5초", fx = "reload", v = 0.5 },
+	{ id = "u2", r = "U", name = "군의관 도로시", skill = "도선 아군 체력 +40", fx = "allyHp", v = 40 },
+	{ id = "u3", r = "U", name = "감시탑 릴리", skill = "선회포 재장전 −0.2초", fx = "swivel", v = 0.2 },
+	{ id = "r1", r = "R", name = "밧줄잡이 카토", skill = "갈고리 절단 시간 +0.7초", fx = "rope", v = 0.7 },
+	{ id = "r2", r = "R", name = "돌격대장 오르카", skill = "아군 보조딜 8→12", fx = "allyDmgSet", v = 12 },
+	{ id = "r3", r = "R", name = "포수 쌍둥이", skill = "일제사격 산포 −1.5", fx = "spread", v = 1.5 },
+	{ id = "s1", r = "S", name = "⭐화약귀 로소", skill = "일제사격 마지막 탄 크리티컬 ×2", fx = "critLast", v = 2 },
+	{ id = "s2", r = "S", name = "⭐검귀 하연", skill = "내 검격 35→50", fx = "sword", v = 50 },
+}
+local TAVERN_BY_ID = {}
+for _, c in TAVERN do TAVERN_BY_ID[c.id] = c end
+local R_ORDER = { C = 1, U = 2, R = 3, S = 4 }
+
+-- 활성 스쿼드(보유 중 최고 등급 3명)의 효과 합산
+local function squadFx(pf)
+	local fx = { allyHp = 0, allyDmg = 0, reload = 0, swivel = 0, rope = 0,
+		spread = 0, allyDmgSet = 0, critLast = 0, sword = 0, squad = {} }
+	if not (pf and pf.crew) then return fx end
+	local owned = {}
+	for id, n in pf.crew do
+		if n > 0 and TAVERN_BY_ID[id] then table.insert(owned, TAVERN_BY_ID[id]) end
+	end
+	table.sort(owned, function(a, b) return R_ORDER[a.r] > R_ORDER[b.r] end)
+	for i = 1, math.min(3, #owned) do
+		local c = owned[i]
+		table.insert(fx.squad, { id = c.id, name = c.name, r = c.r })
+		if c.fx == "allyDmgSet" or c.fx == "critLast" or c.fx == "sword" then
+			fx[c.fx] = math.max(fx[c.fx], c.v)
+		else
+			fx[c.fx] += c.v
+		end
+	end
+	return fx
+end
+
 -- 상태 (클라 HUD가 구독)
 local state = Instance.new("Folder")
 state.Name = "BattleState"
@@ -213,7 +261,9 @@ local function pushProfile(player)
 	local pf = profiles[player]
 	if pf then
 		RE_Battle:FireClient(player, { type = "profile",
-			silver = pf.silver, stars = pf.stars, upg = pf.upg })
+			silver = pf.silver, stars = pf.stars, upg = pf.upg,
+			crew = pf.crew, pityR = pf.pityR, pityS = pf.pityS, train = pf.train,
+			squad = squadFx(pf).squad })
 	end
 end
 
@@ -221,12 +271,14 @@ local function saveProfile(player)
 	local pf = profiles[player]
 	if not (store and pf) then return end
 	pcall(function()
-		store:SetAsync("p_" .. player.UserId, { silver = pf.silver, stars = pf.stars, upg = pf.upg })
+		store:SetAsync("p_" .. player.UserId, { silver = pf.silver, stars = pf.stars, upg = pf.upg,
+			crew = pf.crew, pityR = pf.pityR, pityS = pf.pityS, train = pf.train })
 	end)
 end
 
 Players.PlayerAdded:Connect(function(player)
-	local pf = { silver = 0, stars = { 0, 0, 0 }, upg = { cannon = 0, armor = 0, aim = 0 } }
+	local pf = { silver = 0, stars = { 0, 0, 0 }, upg = { cannon = 0, armor = 0, aim = 0 },
+		crew = {}, pityR = 0, pityS = 0, train = 0 }
 	if store then
 		local ok, saved = pcall(function() return store:GetAsync("p_" .. player.UserId) end)
 		if ok and type(saved) == "table" then
@@ -237,6 +289,14 @@ Players.PlayerAdded:Connect(function(player)
 			if type(saved.upg) == "table" then
 				for k in pf.upg do pf.upg[k] = math.clamp(tonumber(saved.upg[k]) or 0, 0, 3) end
 			end
+			if type(saved.crew) == "table" then
+				for id, n in saved.crew do
+					if TAVERN_BY_ID[id] then pf.crew[id] = tonumber(n) or 0 end
+				end
+			end
+			pf.pityR = tonumber(saved.pityR) or 0
+			pf.pityS = tonumber(saved.pityS) or 0
+			pf.train = tonumber(saved.train) or 0
 		end
 	end
 	profiles[player] = pf
@@ -320,6 +380,7 @@ end
 --------------------------------------------------------------------
 local crews = {}   -- 적 선원
 local allies = {}  -- 아군 선원 (같이 도선해서 싸움 — 해적 놀이의 핵심)
+local allyChip = 8 -- 아군 보조딜 (스쿼드 효과로 변동)
 
 local function makeCrewman(parent, pos, bodyColor, headColor, hp)
 	local m = Instance.new("Model")
@@ -372,13 +433,38 @@ local function startBoarding()
 			Color3.fromRGB(165, 120, 95), Color3.fromRGB(255, 90, 80), 80)
 		crews[i].model.Name = "BCrew" .. i
 	end
-	-- 아군 선원 3명: 내 갑판에서 같이 도선 (홀드 역할 — 결정타는 플레이어)
+	-- 아군 선원 3명: 스쿼드(가챠 보유 최고등급 3명)가 곧 도선 멤버
+	local bfx = { allyHp = 0, allyDmg = 0, allyDmgSet = 0, squad = {} }
+	for _, plr in Players:GetPlayers() do
+		local f = squadFx(profiles[plr])
+		bfx.allyHp = math.max(bfx.allyHp, f.allyHp)
+		bfx.allyDmg = math.max(bfx.allyDmg, f.allyDmg)
+		bfx.allyDmgSet = math.max(bfx.allyDmgSet, f.allyDmgSet)
+		if #f.squad > #bfx.squad then bfx.squad = f.squad end
+	end
+	allyChip = math.max(8 + bfx.allyDmg, bfx.allyDmgSet)
+	local R_COLOR = {
+		C = Color3.fromRGB(90, 190, 255), U = Color3.fromRGB(120, 255, 150),
+		R = Color3.fromRGB(200, 130, 255), S = Color3.fromRGB(255, 200, 60),
+	}
 	table.clear(allies)
 	for i = 1, 3 do
+		local member = bfx.squad[i]
+		local headColor = member and R_COLOR[member.r] or Color3.fromRGB(90, 190, 255)
 		allies[i] = makeCrewman(boardFolder,
 			Vector3.new(6, 11, -14 + i * 12),
-			Color3.fromRGB(90, 120, 170), Color3.fromRGB(90, 190, 255), 100)
-		allies[i].model.Name = "Ally" .. i
+			Color3.fromRGB(90, 120, 170), headColor, 100 + bfx.allyHp)
+		allies[i].model.Name = member and member.name or ("선원 " .. i)
+		if member then
+			local tag = Instance.new("BillboardGui")
+			tag.Size = UDim2.fromScale(7, 0.9); tag.StudsOffset = Vector3.new(0, 4.3, 0); tag.AlwaysOnTop = true
+			tag.Parent = allies[i].root
+			local tl = Instance.new("TextLabel")
+			tl.Size = UDim2.fromScale(1, 1); tl.BackgroundTransparency = 1
+			tl.Font = Enum.Font.FredokaOne; tl.TextScaled = true
+			tl.Text = member.name; tl.TextColor3 = headColor
+			tl.TextStrokeTransparency = 0.4; tl.Parent = tag
+		end
 	end
 end
 
@@ -457,7 +543,7 @@ task.spawn(function()
 						stepTo(al, best.root.Position, 8.5)
 					elseif now - al.lastAtk > 1.6 then
 						al.lastAtk = now
-						best.hp -= 8
+						best.hp -= allyChip
 						best.bar.Size = UDim2.fromScale(math.max(0, best.hp / best.maxhp), 0.4)
 						RE_Battle:FireAllClients({ type = "crewHit", pos = best.root.Position, ally = true })
 						if best.hp <= 0 then
@@ -479,11 +565,14 @@ RE_Swing.OnServerEvent:Connect(function(player)
 	lastFire[player] = now
 	local hrp = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
 	if not hrp then return end
+	local swordDmg = 35
+	local sfx = squadFx(profiles[player])
+	if sfx.sword > 0 then swordDmg = sfx.sword end
 	for _, rec in crews do
 		if rec.alive then
 			local off = rec.root.Position - hrp.Position
 			if off.Magnitude <= 10 and off.Unit:Dot(hrp.CFrame.LookVector) >= 0.35 then
-				rec.hp -= 35
+				rec.hp -= swordDmg
 				rec.bar.Size = UDim2.fromScale(math.max(0, rec.hp / rec.maxhp), 0.4)
 				RE_Battle:FireAllClients({ type = "crewHit", pos = rec.root.Position })
 				if rec.hp <= 0 then
@@ -516,7 +605,8 @@ RE_Fire.OnServerEvent:Connect(function(player, aimPos)
 	if sunk or not battleActive or phase.Value == 3 then return end
 	if typeof(aimPos) ~= "Vector3" then return end
 	local now = os.clock()
-	local cd = phase.Value == 2 and 1.2 or CONFIG.FireCooldown
+	local pfx = squadFx(profiles[player])
+	local cd = phase.Value == 2 and (1.2 - pfx.swivel) or (CONFIG.FireCooldown - pfx.reload)
 	if lastFire[player] and now - lastFire[player] < cd - 0.15 then return end
 	lastFire[player] = now
 	-- 조준점 새니티: 적함 근방만 허용
@@ -524,8 +614,9 @@ RE_Fire.OnServerEvent:Connect(function(player, aimPos)
 
 	local pf = profiles[player]
 	local upg = pf and pf.upg or { cannon = 0, armor = 0, aim = 0 }
+	local fx = squadFx(pf)
 	local shotCount = CONFIG.CannonCount + upg.cannon
-	local spread = CONFIG.ShotSpread - upg.aim * 1.75
+	local spread = math.max(1.5, CONFIG.ShotSpread - upg.aim * 1.75 - fx.spread)
 	if phase.Value == 2 then
 		shotCount = 1        -- 2막: 선회포 단발 (빠른 연사, 저격)
 		spread = 2.5
@@ -567,6 +658,19 @@ RE_Fire.OnServerEvent:Connect(function(player, aimPos)
 		end
 		table.insert(shots, shot)
 	end
+	-- ⭐화약귀: 마지막 탄 크리티컬 (명중 시)
+	if fx.critLast > 0 and phase.Value == 1 then
+		local last = shots[#shots]
+		if last and last.seg ~= "Miss" then
+			local extra = last.dmg -- ×2 = 기본 피해만큼 추가
+			last.dmg = last.dmg * fx.critLast
+			last.crit = true
+			if last.seg == "Sail" then hpSail.Value = math.max(0, hpSail.Value - extra)
+			elseif last.seg == "Deck" then hpDeck.Value = math.max(0, hpDeck.Value - extra)
+			else hpHull.Value = math.max(0, hpHull.Value - extra) end
+		end
+	end
+
 	RE_FireResult:FireAllClients({ shooter = player.Name, shots = shots })
 
 	-- 1막 → 2막 전환: 적 선체 50% 붕괴 시 접근전
@@ -720,8 +824,12 @@ task.spawn(function()
 		local id = grappleId
 		grapples[id] = true
 		local z = math.random(-20, 20)
+		local ropeBonus = 0
+		for _, plr in Players:GetPlayers() do
+			ropeBonus = math.max(ropeBonus, squadFx(profiles[plr]).rope)
+		end
 		RE_Battle:FireAllClients({ type = "grapple", id = id, z = z })
-		task.delay(2.6, function()
+		task.delay(2.6 + ropeBonus, function()
 			if grapples[id] then
 				grapples[id] = nil
 				shipHP.Value = math.max(0, shipHP.Value - 120)
@@ -737,6 +845,50 @@ RE_Cut.OnServerEvent:Connect(function(player, id)
 	if id and grapples[id] then
 		grapples[id] = nil
 		RE_Battle:FireAllClients({ type = "grappleCut", id = id, by = player.Name })
+	end
+end)
+
+-- 선술집 가챠 (서버 권위 — 확률·천장 로직 전부 서버)
+local RE_Gacha = mkRemote("Gacha")
+RE_Gacha.OnServerEvent:Connect(function(player)
+	local pf = profiles[player]
+	if not pf or pf.silver < GACHA_COST then return end
+	pf.silver -= GACHA_COST
+
+	-- 등급 결정 (천장 우선)
+	local rarity
+	if pf.pityS >= PITY_SR - 1 then
+		rarity = "S"
+	elseif pf.pityR >= PITY_RARE - 1 then
+		rarity = math.random(100) <= 23 and "S" or "R" -- 레어 천장 시 SR 확률 상향
+	else
+		local roll = math.random(100)
+		if roll <= ODDS.S then rarity = "S"
+		elseif roll <= ODDS.S + ODDS.R then rarity = "R"
+		elseif roll <= ODDS.S + ODDS.R + ODDS.U then rarity = "U"
+		else rarity = "C" end
+	end
+	pf.pityS = rarity == "S" and 0 or pf.pityS + 1
+	pf.pityR = (rarity == "S" or rarity == "R") and 0 or pf.pityR + 1
+
+	local pool = {}
+	for _, c in TAVERN do
+		if c.r == rarity then table.insert(pool, c) end
+	end
+	local pick = pool[math.random(#pool)]
+	local dupe = (pf.crew[pick.id] or 0) > 0
+	pf.crew[pick.id] = (pf.crew[pick.id] or 0) + 1
+	if dupe then pf.train += (R_ORDER[rarity]) end -- 중복은 훈련점수로 (항상 전환)
+
+	local lv = player:FindFirstChild("leaderstats")
+	local sv = lv and lv:FindFirstChild("은화")
+	if sv then sv.Value = pf.silver end
+	saveProfile(player)
+	pushProfile(player)
+	RE_Battle:FireClient(player, { type = "gachaResult",
+		id = pick.id, name = pick.name, rarity = rarity, skill = pick.skill, dupe = dupe })
+	if rarity == "S" then
+		RE_Battle:FireAllClients({ type = "srPull", who = player.Name, name = pick.name })
 	end
 end)
 

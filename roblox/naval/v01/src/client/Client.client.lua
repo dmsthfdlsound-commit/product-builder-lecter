@@ -669,6 +669,112 @@ shopBtn.Activated:Connect(function()
 end)
 shopClose.Activated:Connect(function() shop.Visible = false end)
 
+-- 선술집 (가챠) — 확률 상시 공개 + 천장 카운터 노출이 원칙
+local RE_Gacha = remotes:WaitForChild("Gacha")
+local myPityR, myPityS, myTrain = 0, 0, 0
+local myCrew = {}
+local mySquad = {}
+local R_KO = { C = "커먼", U = "언커먼", R = "레어", S = "슈퍼레어" }
+local R_COL = {
+	C = Color3.fromRGB(180, 200, 220), U = Color3.fromRGB(120, 230, 150),
+	R = Color3.fromRGB(200, 130, 255), S = Color3.fromRGB(255, 200, 60),
+}
+
+local tavernBtn = Instance.new("TextButton")
+tavernBtn.AnchorPoint = Vector2.new(0.5, 1)
+tavernBtn.Position = UDim2.new(0.28, 0, 0.92, 0)
+tavernBtn.Size = UDim2.new(0.34, 0, 0.06, 0)
+tavernBtn.Font = Enum.Font.FredokaOne
+tavernBtn.TextScaled = true
+tavernBtn.Text = "🍺 선술집 (선원 모집)"
+tavernBtn.TextColor3 = Color3.new(1, 1, 1)
+tavernBtn.BackgroundColor3 = Color3.fromRGB(150, 90, 130)
+tavernBtn.ZIndex = 11
+tavernBtn.Parent = chart
+local tbc = Instance.new("UICorner"); tbc.CornerRadius = UDim.new(0, 12); tbc.Parent = tavernBtn
+
+local tavern = Instance.new("Frame")
+tavern.AnchorPoint = Vector2.new(0.5, 0.5)
+tavern.Position = UDim2.fromScale(0.5, 0.5)
+tavern.Size = UDim2.new(0.82, 0, 0.7, 0)
+tavern.BackgroundColor3 = Color3.fromRGB(40, 28, 40)
+tavern.Visible = false
+tavern.ZIndex = 15
+tavern.Parent = gui
+local tvc = Instance.new("UICorner"); tvc.CornerRadius = UDim.new(0, 16); tvc.Parent = tavern
+label({ Position = UDim2.new(0, 0, 0.02, 0), Size = UDim2.new(1, 0, 0.1, 0),
+	Text = "🍺 선술집 — 선원 모집 (150🪙)", ZIndex = 16,
+	TextColor3 = Color3.fromRGB(255, 210, 160) }, tavern)
+label({ Position = UDim2.new(0, 0, 0.12, 0), Size = UDim2.new(1, 0, 0.06, 0),
+	Text = "확률: 커먼 60% · 언커먼 27% · 레어 10% · 슈퍼레어 3% (상시 공개)", ZIndex = 16,
+	TextTransparency = 0.15 }, tavern)
+local pityLabel = label({ Position = UDim2.new(0, 0, 0.19, 0), Size = UDim2.new(1, 0, 0.06, 0),
+	Text = "", ZIndex = 16, TextColor3 = Color3.fromRGB(255, 230, 140) }, tavern)
+local squadLabel = label({ Position = UDim2.new(0, 0, 0.26, 0), Size = UDim2.new(1, 0, 0.06, 0),
+	Text = "", ZIndex = 16, TextColor3 = Color3.fromRGB(150, 220, 255) }, tavern)
+
+-- 결과 카드
+local resultCard = Instance.new("Frame")
+resultCard.AnchorPoint = Vector2.new(0.5, 0.5)
+resultCard.Position = UDim2.fromScale(0.5, 0.52)
+resultCard.Size = UDim2.new(0.7, 0, 0.3, 0)
+resultCard.BackgroundColor3 = Color3.fromRGB(60, 45, 60)
+resultCard.Visible = false
+resultCard.ZIndex = 17
+resultCard.Parent = tavern
+local rcc = Instance.new("UICorner"); rcc.CornerRadius = UDim.new(0, 14); rcc.Parent = resultCard
+local rcStroke = Instance.new("UIStroke"); rcStroke.Thickness = 4; rcStroke.Parent = resultCard
+local rcRarity = label({ Position = UDim2.new(0, 0, 0.06, 0), Size = UDim2.new(1, 0, 0.24, 0),
+	Text = "", ZIndex = 18 }, resultCard)
+local rcName = label({ Position = UDim2.new(0, 0, 0.32, 0), Size = UDim2.new(1, 0, 0.3, 0),
+	Text = "", ZIndex = 18 }, resultCard)
+local rcSkill = label({ Position = UDim2.new(0, 0, 0.64, 0), Size = UDim2.new(1, 0, 0.22, 0),
+	Text = "", ZIndex = 18, TextTransparency = 0.1 }, resultCard)
+
+local rollBtn = Instance.new("TextButton")
+rollBtn.AnchorPoint = Vector2.new(0.5, 1)
+rollBtn.Position = UDim2.new(0.5, 0, 0.86, 0)
+rollBtn.Size = UDim2.new(0.44, 0, 0.1, 0)
+rollBtn.Font = Enum.Font.FredokaOne
+rollBtn.TextScaled = true
+rollBtn.Text = "🎲 모집 (150🪙)"
+rollBtn.TextColor3 = Color3.new(1, 1, 1)
+rollBtn.BackgroundColor3 = Color3.fromRGB(200, 120, 60)
+rollBtn.ZIndex = 16
+rollBtn.Parent = tavern
+local rbc = Instance.new("UICorner"); rbc.CornerRadius = UDim.new(0, 12); rbc.Parent = rollBtn
+rollBtn.Activated:Connect(function() RE_Gacha:FireServer() end)
+
+local tavernClose = Instance.new("TextButton")
+tavernClose.AnchorPoint = Vector2.new(0.5, 1)
+tavernClose.Position = UDim2.new(0.5, 0, 0.97, 0)
+tavernClose.Size = UDim2.new(0.3, 0, 0.08, 0)
+tavernClose.Font = Enum.Font.FredokaOne
+tavernClose.TextScaled = true
+tavernClose.Text = "닫기"
+tavernClose.TextColor3 = Color3.new(1, 1, 1)
+tavernClose.BackgroundColor3 = Color3.fromRGB(90, 100, 130)
+tavernClose.ZIndex = 16
+tavernClose.Parent = tavern
+local tcc = Instance.new("UICorner"); tcc.CornerRadius = UDim.new(0, 10); tcc.Parent = tavernClose
+tavernClose.Activated:Connect(function() tavern.Visible = false end)
+
+local function refreshTavern()
+	pityLabel.Text = ("천장: 레어+ 보장까지 %d회 · 슈퍼레어 보장까지 %d회 · 훈련점수 %d"):format(
+		math.max(0, 20 - myPityR), math.max(0, 60 - myPityS), myTrain)
+	local names = {}
+	for _, m in mySquad do
+		table.insert(names, ("[%s] %s"):format(R_KO[m.r] or m.r, m.name))
+	end
+	squadLabel.Text = #names > 0 and ("도선 스쿼드: " .. table.concat(names, " · ")) or "도선 스쿼드: (기본 선원)"
+	rollBtn.BackgroundColor3 = mySilver >= 150
+		and Color3.fromRGB(200, 120, 60) or Color3.fromRGB(110, 80, 70)
+end
+tavernBtn.Activated:Connect(function()
+	tavern.Visible = not tavern.Visible
+	refreshTavern()
+end)
+
 -- 승리 패널
 local winPanel = Instance.new("Frame")
 winPanel.AnchorPoint = Vector2.new(0.5, 0.5)
@@ -816,6 +922,26 @@ RE_Battle.OnClientEvent:Connect(function(data)
 			floater(data.pos + Vector3.new(0, 3.5, 0), "-35", Color3.fromRGB(255, 220, 120))
 			ping(0.55 + math.random() * 0.2, 0.5)
 		end
+	elseif data.type == "gachaResult" then
+		resultCard.Visible = true
+		local col = R_COL[data.rarity] or Color3.new(1, 1, 1)
+		rcStroke.Color = col
+		rcRarity.Text = (data.rarity == "S" and "✨ " or "") .. (R_KO[data.rarity] or data.rarity) .. (data.rarity == "S" and " ✨" or "")
+		rcRarity.TextColor3 = col
+		rcName.Text = data.name
+		rcName.TextColor3 = col
+		rcSkill.Text = "🎯 " .. data.skill .. (data.dupe and "  (중복 → 훈련점수)" or "")
+		if data.rarity == "S" then
+			ping(0.8, 0.9); ping(1.1, 0.9); ping(1.4, 0.9)
+			shake(1.2, 0.4)
+		elseif data.rarity == "R" then
+			ping(0.9, 0.8); ping(1.2, 0.7)
+		else
+			ping(1.0, 0.6)
+		end
+		refreshTavern()
+	elseif data.type == "srPull" then
+		showBanner("✨ " .. data.who .. "님이 [슈퍼레어] " .. data.name .. " 영입!!", "선술집에서 모집 가능", 3.5)
 	elseif data.type == "phase2" then
 		phaseXTarget = 210
 		FIRE_CD = 1.2
@@ -840,8 +966,14 @@ RE_Battle.OnClientEvent:Connect(function(data)
 		if type(data.upg) == "table" then
 			for k in myUpg do myUpg[k] = data.upg[k] or 0 end
 		end
+		myPityR = data.pityR or 0
+		myPityS = data.pityS or 0
+		myTrain = data.train or 0
+		if type(data.crew) == "table" then myCrew = data.crew end
+		if type(data.squad) == "table" then mySquad = data.squad end
 		refreshChart()
 		refreshShop()
+		refreshTavern()
 	elseif data.type == "countdown" then
 		chart.Visible = false
 		winPanel.Visible = false
