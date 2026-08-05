@@ -76,8 +76,10 @@ local hpHull = mkInt("HullHP", 0)
 local hpDeck = mkInt("DeckHP", 0)
 local shipHP = mkInt("ShipHP", CONFIG.ShipHP)
 local curStage = mkInt("Stage", 0) -- 0 = 해도 화면
-local phase = mkInt("Phase", 1)    -- 1 = 원거리 포격전, 2 = 중거리 총격전
+local phase = mkInt("Phase", 1)    -- 1 = 포격전, 2 = 총격전, 3 = 백병전
 local RE_Cut = mkRemote("CutGrapple")
+local RE_Swing = mkRemote("Swing")
+local PHASE3_OFFSET = 291          -- 3막 적함 시각 위치 = 330 − 291 = X 39 (현측 접현)
 
 --------------------------------------------------------------------
 -- 월드 생성
@@ -264,9 +266,190 @@ local rayParams = RaycastParams.new()
 rayParams.FilterType = Enum.RaycastFilterType.Include
 rayParams.FilterDescendantsInstances = { enemy }
 
+--------------------------------------------------------------------
+-- 승리 처리 (격침 or 나포)
+--------------------------------------------------------------------
+local boardFolder = nil -- 3막 임시 오브젝트 (널판·적 선원)
+
+local function clearBoarding()
+	if boardFolder then boardFolder:Destroy(); boardFolder = nil end
+end
+
+local function winStage(boarded)
+	if sunk then return end
+	sunk = true
+	battleActive = false
+	local cfg = stageCfg
+	local elapsed = os.clock() - battleStats.startT
+	local stars = 1
+	if shipHP.Value >= CONFIG.ShipHP * 0.75 then stars += 1 end
+	local bonusOk = false
+	if cfg.bonus == "time" then bonusOk = elapsed <= cfg.bonusVal
+	elseif cfg.bonus == "strip" then bonusOk = (hpSail.Value <= 0 and hpDeck.Value <= 0)
+	elseif cfg.bonus == "perfect" then bonusOk = battleStats.perfects >= cfg.bonusVal end
+	if bonusOk then stars += 1 end
+	local reward = boarded and math.floor(cfg.silver * 1.5) or cfg.silver
+
+	RE_Game:FireAllClients({ type = boarded and "captured" or "sunk",
+		sails = hpSail.Value <= 0, crew = hpDeck.Value <= 0 })
+	for _, plr in Players:GetPlayers() do
+		local pf = profiles[plr]
+		if pf then
+			pf.silver += reward
+			if stars > (pf.stars[cfg.id] or 0) then pf.stars[cfg.id] = stars end
+			local lv = plr:FindFirstChild("leaderstats")
+			local sv = lv and lv:FindFirstChild("은화")
+			if sv then sv.Value = pf.silver end
+			saveProfile(plr)
+			pushProfile(plr)
+		end
+	end
+	task.delay(3.5, function()
+		clearBoarding()
+		curStage.Value = 0
+		RE_Battle:FireAllClients({ type = "win", stage = cfg.id, stars = stars,
+			silver = reward, boarded = boarded == true,
+			elapsed = math.floor(elapsed), perfects = battleStats.perfects })
+	end)
+end
+
+--------------------------------------------------------------------
+-- 3막: 도선 백병전 (선원 NPC = CFrame 스테퍼, 물리 리스크 0)
+-- 주의: 3막 오브젝트는 적함의 '시각적' 위치(X≈39)에 스폰 —
+-- 플레이어 물리는 클라이언트에서 돌므로 클라가 옮겨둔 갑판 위를 걸을 수 있다.
+--------------------------------------------------------------------
+local crews = {}
+
+local function startBoarding()
+	if not battleActive or sunk then return end
+	clearBoarding()
+	boardFolder = Instance.new("Folder")
+	boardFolder.Name = "Boarding"
+	boardFolder.Parent = workspace
+	local ex = 330 - PHASE3_OFFSET -- 적함 시각 중심 X ≈ 39
+	for _, pz in { -12, 12 } do
+		part({ Name = "Plank", Size = Vector3.new(17, 0.6, 3.4),
+			CFrame = CFrame.new((12.2 + (ex - 12)) / 2, 9.4, pz) * CFrame.Angles(0, 0, math.rad(-9)),
+			Color = Color3.fromRGB(170, 130, 85), Material = Enum.Material.WoodPlanks }, boardFolder)
+	end
+	table.clear(crews)
+	for i = 1, 4 do
+		local m = Instance.new("Model")
+		m.Name = "BCrew" .. i
+		local root = part({ Name = "Body", Size = Vector3.new(2.4, 5, 1.6),
+			CFrame = CFrame.new(ex - 4 + (i % 2) * 8, 13.4, -18 + i * 8),
+			Color = Color3.fromRGB(165, 120, 95), Material = Enum.Material.SmoothPlastic }, m)
+		part({ Name = "Head", Shape = Enum.PartType.Ball, Size = Vector3.new(1.8, 1.8, 1.8),
+			CFrame = root.CFrame * CFrame.new(0, 3.3, 0),
+			Color = Color3.fromRGB(255, 90, 80), Material = Enum.Material.SmoothPlastic, CanCollide = false }, m)
+		local bb = Instance.new("BillboardGui")
+		bb.Size = UDim2.fromScale(4, 0.9); bb.StudsOffset = Vector3.new(0, 3.4, 0); bb.AlwaysOnTop = true
+		bb.Parent = root
+		local hpBar = Instance.new("Frame")
+		hpBar.Size = UDim2.fromScale(1, 0.4); hpBar.Position = UDim2.fromScale(0, 0.3)
+		hpBar.BackgroundColor3 = Color3.fromRGB(230, 70, 60); hpBar.Parent = bb
+		m.Parent = boardFolder
+		crews[i] = { model = m, root = root, hp = 80, lastAtk = 0, alive = true, bar = hpBar }
+	end
+end
+
+local function crewAlive()
+	local n = 0
+	for _, c in crews do
+		if c.alive then n += 1 end
+	end
+	return n
+end
+
+-- 선원 AI 스테퍼
+task.spawn(function()
+	while true do
+		task.wait(1 / 15)
+		if not battleActive or sunk or phase.Value ~= 3 or not boardFolder then continue end
+		local now = os.clock()
+		for _, rec in crews do
+			if rec.alive and rec.root.Parent then
+				local best, bestD = nil, math.huge
+				for _, plr in Players:GetPlayers() do
+					local hrp = plr.Character and plr.Character:FindFirstChild("HumanoidRootPart")
+					local hum = plr.Character and plr.Character:FindFirstChildOfClass("Humanoid")
+					if hrp and hum and hum.Health > 0 then
+						local d = (hrp.Position - rec.root.Position).Magnitude
+						if d < bestD then best, bestD = hrp, d end
+					end
+				end
+				if best then
+					if bestD > 5 then
+						local dir = (best.Position - rec.root.Position) * Vector3.new(1, 0, 1)
+						if dir.Magnitude > 0.1 then
+							rec.model:PivotTo(CFrame.lookAt(rec.root.Position + dir.Unit * (9.5 / 15),
+								rec.root.Position + dir.Unit * 10))
+						end
+					elseif now - rec.lastAtk > 1.4 then
+						rec.lastAtk = now
+						local hum = best.Parent and best.Parent:FindFirstChildOfClass("Humanoid")
+						if hum then hum:TakeDamage(10) end
+					end
+				end
+			end
+		end
+	end
+end)
+
+-- 커틀러스 검격 (3막 전용)
+RE_Swing.OnServerEvent:Connect(function(player)
+	if not battleActive or sunk or phase.Value ~= 3 then return end
+	local now = os.clock()
+	if lastFire[player] and now - lastFire[player] < 0.45 then return end
+	lastFire[player] = now
+	local hrp = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
+	if not hrp then return end
+	for _, rec in crews do
+		if rec.alive then
+			local off = rec.root.Position - hrp.Position
+			if off.Magnitude <= 10 and off.Unit:Dot(hrp.CFrame.LookVector) >= 0.35 then
+				rec.hp -= 35
+				rec.bar.Size = UDim2.fromScale(math.max(0, rec.hp / 80), 0.4)
+				RE_Battle:FireAllClients({ type = "crewHit", pos = rec.root.Position })
+				if rec.hp <= 0 then
+					rec.alive = false
+					local m = rec.model
+					task.spawn(function()
+						for k = 1, 10 do
+							m:PivotTo(m:GetPivot() * CFrame.new(0, -0.3, 0) * CFrame.Angles(0.1, 0, 0.05))
+							for _, p in m:GetDescendants() do
+								if p:IsA("BasePart") then p.Transparency = k / 10; p.CanCollide = false end
+							end
+							task.wait(0.05)
+						end
+						m:Destroy()
+					end)
+					if crewAlive() == 0 then winStage(true) end
+				end
+			end
+		end
+	end
+end)
+
+-- 커틀러스 지급 (항시 보유, 3막에서만 유효)
+local StarterPack = game:GetService("StarterPack")
+local cutlass = Instance.new("Tool")
+cutlass.Name = "커틀러스"
+cutlass.RequiresHandle = true
+cutlass.CanBeDropped = false
+local chandle = Instance.new("Part")
+chandle.Name = "Handle"
+chandle.Size = Vector3.new(0.4, 4.6, 0.7)
+chandle.Color = Color3.fromRGB(200, 205, 215)
+chandle.Material = Enum.Material.Metal
+chandle.CanCollide = false
+chandle.Parent = cutlass
+cutlass.Grip = CFrame.new(0, -1.6, 0)
+cutlass.Parent = StarterPack
+
 -- 발사 처리
 RE_Fire.OnServerEvent:Connect(function(player, aimPos)
-	if sunk or not battleActive then return end
+	if sunk or not battleActive or phase.Value == 3 then return end
 	if typeof(aimPos) ~= "Vector3" then return end
 	local now = os.clock()
 	local cd = phase.Value == 2 and 1.2 or CONFIG.FireCooldown
@@ -329,39 +512,17 @@ RE_Fire.OnServerEvent:Connect(function(player, aimPos)
 		RE_Battle:FireAllClients({ type = "phase2" })
 	end
 
-	-- 격침 = 스테이지 승리
-	if hpHull.Value <= 0 and not sunk then
-		sunk = true
-		battleActive = false
-		local cfg = stageCfg
-		local elapsed = os.clock() - battleStats.startT
-		-- 별 계산: ①승리 ②아군 선체 75%+ ③스테이지별 보너스
-		local stars = 1
-		if shipHP.Value >= CONFIG.ShipHP * 0.75 then stars += 1 end
-		local bonusOk = false
-		if cfg.bonus == "time" then bonusOk = elapsed <= cfg.bonusVal
-		elseif cfg.bonus == "strip" then bonusOk = (hpSail.Value <= 0 and hpDeck.Value <= 0)
-		elseif cfg.bonus == "perfect" then bonusOk = battleStats.perfects >= cfg.bonusVal end
-		if bonusOk then stars += 1 end
+	-- 2막 → 3막 도선: 적 선체 25% 이하
+	if phase.Value == 2 and battleActive and not sunk
+		and hpHull.Value > 0 and hpHull.Value <= math.floor(stageCfg.hp.Hull * 0.25) then
+		phase.Value = 3
+		RE_Battle:FireAllClients({ type = "phase3" })
+		task.delay(3.5, startBoarding)
+	end
 
-		RE_Game:FireAllClients({ type = "sunk", sails = hpSail.Value <= 0, crew = hpDeck.Value <= 0 })
-		for _, plr in Players:GetPlayers() do
-			local pf = profiles[plr]
-			if pf then
-				pf.silver += cfg.silver
-				if stars > (pf.stars[cfg.id] or 0) then pf.stars[cfg.id] = stars end
-				local lv = plr:FindFirstChild("leaderstats")
-				local sv = lv and lv:FindFirstChild("은화")
-				if sv then sv.Value = pf.silver end
-				saveProfile(plr)
-				pushProfile(plr)
-			end
-		end
-		task.delay(3.5, function()
-			curStage.Value = 0
-			RE_Battle:FireAllClients({ type = "win", stage = cfg.id, stars = stars,
-				silver = cfg.silver, elapsed = math.floor(elapsed), perfects = battleStats.perfects })
-		end)
+	-- 격침 = 스테이지 승리 (1·2막에서 선체 0)
+	if hpHull.Value <= 0 and not sunk then
+		winStage(false)
 	end
 end)
 
@@ -373,7 +534,7 @@ end)
 task.spawn(function()
 	while true do
 		task.wait(0.5)
-		if not battleActive or sunk or #Players:GetPlayers() == 0 then continue end
+		if not battleActive or sunk or phase.Value == 3 or #Players:GetPlayers() == 0 then continue end
 		local cfg = stageCfg
 		local interval = math.random(cfg.interval[1], cfg.interval[2])
 		if hpSail.Value <= 0 then interval = math.floor(interval * 1.6) end -- 돛 파괴 → 재장전 지연
@@ -387,7 +548,7 @@ task.spawn(function()
 
 		RE_Volley:FireAllClients({ phase = "warn" })
 		task.wait(1.0)
-		if not battleActive or sunk then continue end
+		if not battleActive or sunk or phase.Value == 3 then continue end
 		local impactT = os.clock()
 
 		local bestFactor, bestGrade = 1.0, "full"
@@ -451,6 +612,7 @@ RE_Select.OnServerEvent:Connect(function(player, stageId)
 	stageCfg = cfg
 	curStage.Value = stageId
 	phase.Value = 1
+	clearBoarding()
 	sunk = false
 	hpSail.Value = cfg.hp.Sail
 	hpHull.Value = cfg.hp.Hull

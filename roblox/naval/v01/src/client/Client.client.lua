@@ -489,7 +489,11 @@ end)
 -- 게임 이벤트 (격침/패배/리셋)
 --------------------------------------------------------------------
 RE_Game.OnClientEvent:Connect(function(data)
-	if data.type == "sunk" then
+	if data.type == "captured" then
+		play(0.6, 1)
+		shake(1, 0.4)
+		showBanner("🏴‍☠️ 나포!!", "적함을 접수했다 — 보상 1.5배", 3.5)
+	elseif data.type == "sunk" then
 		sinkStart = os.clock()
 		play(0.3, 1)
 		shake(1.2, 0.6)
@@ -771,8 +775,44 @@ UserInputService.InputBegan:Connect(function(input, processed)
 	end
 end)
 
+-- 3막: 커틀러스 스윙 훅
+local RE_Swing = remotes:WaitForChild("Swing")
+local function hookTool(tool)
+	if tool.Name ~= "커틀러스" then return end
+	tool.Activated:Connect(function()
+		RE_Swing:FireServer()
+		local anim = Instance.new("StringValue")
+		anim.Name = "toolanim"
+		anim.Value = "Slash"
+		anim.Parent = tool
+		ping(1.3 + math.random() * 0.3, 0.35)
+	end)
+end
+local backpack = player:WaitForChild("Backpack")
+backpack.ChildAdded:Connect(function(c)
+	if c:IsA("Tool") then hookTool(c) end
+end)
+player.CharacterAdded:Connect(function(char)
+	char.ChildAdded:Connect(function(c)
+		if c:IsA("Tool") then hookTool(c) end
+	end)
+end)
+for _, t in backpack:GetChildren() do
+	if t:IsA("Tool") then hookTool(t) end
+end
+
 RE_Battle.OnClientEvent:Connect(function(data)
-	if data.type == "phase2" then
+	if data.type == "phase3" then
+		phaseXTarget = 291
+		fireLabel = "⚔️ 백병전!"
+		for id in hooks do removeHook(id) end
+		showBanner("🪝 3막 — 도선!!", "널판을 건너 적 선원 소탕 — 커틀러스(1번) 장착 후 클릭/탭", 4)
+		play(0.45, 1)
+		shake(1.5, 0.5)
+	elseif data.type == "crewHit" then
+		floater(data.pos + Vector3.new(0, 3.5, 0), "-35", Color3.fromRGB(255, 220, 120))
+		ping(0.55 + math.random() * 0.2, 0.5)
+	elseif data.type == "phase2" then
 		phaseXTarget = 210
 		FIRE_CD = 1.2
 		fireLabel = "🎯 선회포"
@@ -820,7 +860,8 @@ RE_Battle.OnClientEvent:Connect(function(data)
 			refreshBars()
 		end)
 	elseif data.type == "win" then
-		winTitle.Text = ("⚓ %s 격침!!"):format(STAGE_INFO[data.stage] and STAGE_INFO[data.stage].name or "적함")
+		local nm = STAGE_INFO[data.stage] and STAGE_INFO[data.stage].name or "적함"
+		winTitle.Text = data.boarded and ("🏴‍☠️ %s 나포!! (×1.5)"):format(nm) or ("⚓ %s 격침!!"):format(nm)
 		winInfo.Text = ("🪙 +%d  ·  %d초  ·  퍼펙트 %d회"):format(data.silver, data.elapsed, data.perfects)
 		winStars.Text = ""
 		winPanel.Visible = true
