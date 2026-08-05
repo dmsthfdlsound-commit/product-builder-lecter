@@ -414,17 +414,85 @@ local function downCrewman(rec)
 	end)
 end
 
+--------------------------------------------------------------------
+-- 항행 가능 영역(zone) — NPC가 바다로 걸어나가는 것을 구조적으로 차단
+-- zone = { x1, x2, z1, z2, y(발판 위 root 중심 높이), id }
+--------------------------------------------------------------------
+local BOARD_EX = 330 - PHASE3_OFFSET   -- 적함 시각 중심 X ≈ 39
+local PLANK_W = 9                       -- 널판 폭 (넓혀서 플레이어 낙하 방지)
+local ZONES = {
+	{ id = "mine",  x1 = -11, x2 = 11,  z1 = -26, z2 = 26, y = 10.5 },
+	{ id = "enemy", x1 = BOARD_EX - 10, x2 = BOARD_EX + 10, z1 = -30, z2 = 30, y = 13.2 },
+	{ id = "plankA", x1 = 11, x2 = BOARD_EX - 10, z1 = -12 - PLANK_W / 2, z2 = -12 + PLANK_W / 2, y = 11.9 },
+	{ id = "plankB", x1 = 11, x2 = BOARD_EX - 10, z1 = 12 - PLANK_W / 2, z2 = 12 + PLANK_W / 2, y = 11.9 },
+}
+local PLANK_Z = { -12, 12 }
+
+local function zoneAt(pos)
+	for _, z in ZONES do
+		if pos.X >= z.x1 and pos.X <= z.x2 and pos.Z >= z.z1 and pos.Z <= z.z2 then
+			return z
+		end
+	end
+	return nil
+end
+
+-- 목표가 다른 배에 있으면 가장 가까운 널판 입구를 경유지로 반환
+local function navTarget(fromPos, toPos)
+	local a, b = zoneAt(fromPos), zoneAt(toPos)
+	if not b then return toPos end
+	local aSide = a and (a.id == "mine" and "mine" or (a.id == "enemy" and "enemy" or "plank")) or "mine"
+	local bSide = b.id == "mine" and "mine" or (b.id == "enemy" and "enemy" or "plank")
+	if aSide == "plank" or aSide == bSide then return toPos end
+	-- 반대편 배 → 가장 가까운 널판 중심선으로 유도
+	local bestZ, bestD = PLANK_Z[1], math.huge
+	for _, pz in PLANK_Z do
+		local d = math.abs(fromPos.Z - pz)
+		if d < bestD then bestZ, bestD = pz, d end
+	end
+	-- 널판 통로를 따라 반대편 갑판 입구까지
+	local targetX = (bSide == "enemy") and (BOARD_EX - 8) or 9
+	if math.abs(fromPos.Z - bestZ) > 2.5 then
+		-- 먼저 널판 입구 앞으로 정렬
+		local entryX = (aSide == "mine") and 9 or (BOARD_EX - 8)
+		return Vector3.new(entryX, fromPos.Y, bestZ)
+	end
+	return Vector3.new(targetX, fromPos.Y, bestZ)
+end
+
 local function startBoarding()
 	if not battleActive or sunk then return end
 	clearBoarding()
 	boardFolder = Instance.new("Folder")
 	boardFolder.Name = "Boarding"
 	boardFolder.Parent = workspace
-	local ex = 330 - PHASE3_OFFSET -- 적함 시각 중심 X ≈ 39
-	for _, pz in { -12, 12 } do
-		part({ Name = "Plank", Size = Vector3.new(17, 0.6, 3.4),
-			CFrame = CFrame.new((12.2 + (ex - 12)) / 2, 9.4, pz) * CFrame.Angles(0, 0, math.rad(-9)),
+	local ex = BOARD_EX
+	for _, pz in PLANK_Z do
+		-- 널판: 넓고 평평하게 (기울기 제거 → 플레이어가 미끄러지지 않음)
+		part({ Name = "Plank", Size = Vector3.new(ex - 10 - 11 + 4, 1, PLANK_W),
+			CFrame = CFrame.new((11 + (ex - 10)) / 2, 9.4, pz),
 			Color = Color3.fromRGB(170, 130, 85), Material = Enum.Material.WoodPlanks }, boardFolder)
+		-- 양옆 난간 (낙하 방지)
+		for _, side in { -1, 1 } do
+			part({ Name = "PlankRail", Size = Vector3.new(ex - 10 - 11 + 4, 4, 0.6),
+				CFrame = CFrame.new((11 + (ex - 10)) / 2, 11.9, pz + side * (PLANK_W / 2)),
+				Color = Color3.fromRGB(120, 95, 60), Material = Enum.Material.Wood,
+				Transparency = 0.25 }, boardFolder)
+		end
+	end
+	-- 적 갑판 실물 발판 (서버 적함은 X=330에 있으므로 3막 위치에 걷기용 갑판을 깔아준다)
+	part({ Name = "BoardDeck", Size = Vector3.new(22, 1, 62),
+		CFrame = CFrame.new(ex, 10.2, 0),
+		Color = Color3.fromRGB(140, 100, 66), Material = Enum.Material.WoodPlanks }, boardFolder)
+	for _, side in { -1, 1 } do
+		part({ Name = "BoardRail", Size = Vector3.new(1, 5, 62),
+			CFrame = CFrame.new(ex + side * 11, 13.2, 0),
+			Color = Color3.fromRGB(70, 50, 60), Material = Enum.Material.Wood }, boardFolder)
+	end
+	for _, zEnd in { -31, 31 } do
+		part({ Name = "BoardRailEnd", Size = Vector3.new(22, 5, 1),
+			CFrame = CFrame.new(ex, 13.2, zEnd),
+			Color = Color3.fromRGB(70, 50, 60), Material = Enum.Material.Wood }, boardFolder)
 	end
 	table.clear(crews)
 	for i = 1, 4 do
@@ -476,13 +544,32 @@ local function crewAlive()
 	return n
 end
 
--- 선원 AI 스테퍼 (적·아군 공용 — 서로 교전)
+-- 선원 AI 스테퍼 (적·아군 공용) — 항행 영역 밖으로는 절대 못 나간다
 local function stepTo(rec, targetPos, speed)
-	local dir = (targetPos - rec.root.Position) * Vector3.new(1, 0, 1)
-	if dir.Magnitude > 0.1 then
-		rec.model:PivotTo(CFrame.lookAt(rec.root.Position + dir.Unit * (speed / 15),
-			rec.root.Position + dir.Unit * 10))
+	local from = rec.root.Position
+	local goal = navTarget(from, targetPos)           -- 다른 배면 널판 경유
+	local dir = (goal - from) * Vector3.new(1, 0, 1)
+	if dir.Magnitude < 0.1 then return end
+	dir = dir.Unit
+	local step = speed / 15
+	local cand = from + dir * step
+	local z = zoneAt(cand)
+	if not z then
+		-- 정면이 막히면 좌/우로 미끄러져 우회 (벽 슬라이딩)
+		local slid = false
+		for _, alt in { Vector3.new(dir.Z, 0, -dir.X), Vector3.new(-dir.Z, 0, dir.X) } do
+			local c2 = from + alt * step
+			local z2 = zoneAt(c2)
+			if z2 then
+				cand, z, slid = c2, z2, true
+				dir = alt
+				break
+			end
+		end
+		if not slid then return end                   -- 갈 곳이 없으면 제자리 (바다행 금지)
 	end
+	local snapped = Vector3.new(cand.X, z.y, cand.Z)  -- 발판 높이에 스냅
+	rec.model:PivotTo(CFrame.lookAt(snapped, snapped + dir * 10))
 end
 
 task.spawn(function()
@@ -552,6 +639,22 @@ task.spawn(function()
 						end
 					end
 				end
+			end
+		end
+	end
+end)
+
+-- 플레이어 낙하 구조 (3막에서 바다에 빠지면 내 갑판으로 복귀)
+task.spawn(function()
+	while true do
+		task.wait(0.4)
+		if phase.Value ~= 3 or not boardFolder then continue end
+		for _, plr in Players:GetPlayers() do
+			local char = plr.Character
+			local hrp = char and char:FindFirstChild("HumanoidRootPart")
+			if hrp and hrp.Position.Y < 6 then
+				char:PivotTo(CFrame.new(0, 12, 0))
+				RE_Battle:FireClient(plr, { type = "rescued" })
 			end
 		end
 	end

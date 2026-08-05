@@ -61,23 +61,38 @@ local UPG_INFO = {
 --------------------------------------------------------------------
 -- 사운드 (내장 에셋 — 본편에서 실제 SFX로 교체)
 --------------------------------------------------------------------
-local function play(speed, vol)
+--------------------------------------------------------------------
+-- 사운드: 전자음 제거, 목재·금속·저음 위주로 재구성
+-- (내장 에셋만 사용 — 마켓 사운드로 교체하려면 SFX 테이블의 id만 바꾸면 됨)
+--------------------------------------------------------------------
+local SFX = {
+	boom    = "rbxasset://sounds/bass.wav",          -- 대포 발사 (묵직한 저음)
+	thud    = "rbxasset://sounds/collide.wav",       -- 목재 착탄/피격
+	clang   = "rbxasset://sounds/metal.ogg",         -- 브레이스 성공 (금속 튕김)
+	swoosh  = "rbxasset://sounds/swoosh.wav",        -- 포탄 비행 / 검 휘두름
+	splash  = "rbxasset://sounds/impact_water.mp3",  -- 물기둥
+	drum    = "rbxasset://sounds/bass.wav",          -- 경고 북소리
+	fanfare = "rbxasset://sounds/victory.wav",       -- 승리
+}
+
+local function sfx(id, speed, vol, life)
 	local s = Instance.new("Sound")
-	s.SoundId = "rbxasset://sounds/impact_water.mp3"
+	s.SoundId = id
 	s.PlaybackSpeed = speed
 	s.Volume = vol
 	s.Parent = camera
 	s:Play()
-	task.delay(2.5, function() s:Destroy() end)
+	task.delay(life or 3, function() s:Destroy() end)
 end
+
+-- 대포 발사: 저음 붐 + 목재 충격 레이어
+local function play(speed, vol)
+	sfx(SFX.boom, 0.32 * (speed / 0.42), math.min(1, vol * 1.1))
+	sfx(SFX.thud, 0.5 + math.random() * 0.15, vol * 0.5)
+end
+-- 범용 짧은 타격음 (착탄·검격 등) — 전자음 대신 목재/금속
 local function ping(speed, vol)
-	local s = Instance.new("Sound")
-	s.SoundId = "rbxasset://sounds/electronicpingshort.wav"
-	s.PlaybackSpeed = speed
-	s.Volume = vol
-	s.Parent = camera
-	s:Play()
-	task.delay(1.5, function() s:Destroy() end)
+	sfx(SFX.thud, math.clamp(speed * 0.8, 0.3, 1.6), vol)
 end
 
 --------------------------------------------------------------------
@@ -93,7 +108,8 @@ for _, p in foam:GetChildren() do
 end
 local ENEMY_CENTER = CFrame.new(330, 6, 0)
 local sinkStart = nil -- os.clock (침몰 연출)
-local phaseX, phaseXTarget = 0, 0 -- 2막 접근 오프셋 (330 → 120)
+local phaseX, phaseXTarget = 0, 0 -- 접근 오프셋 (거리 = 330 − phaseX)
+local driftStart = nil            -- 1막 상시 접근 시작 시각
 
 local shakeAmp, shakeUntil = 0, 0
 local function shake(amp, dur)
@@ -118,11 +134,22 @@ RunService.RenderStepped:Connect(function()
 		local a = math.clamp((os.clock() - sinkStart) / 4.5, 0, 1)
 		bob = CFrame.new(0, -24 * a * a, 0) * CFrame.Angles(0, 0, math.rad(28) * a) * bob
 	end
-	-- 2막 접근: 적함이 미끄러져 들어옴
+	-- 거리 접근: 1막에도 계속 조금씩 좁혀지고, 페이즈 전환 때 크게 붙는다
+	if driftStart and phaseXTarget < 84 then
+		phaseXTarget = math.min(84, (os.clock() - driftStart) * 1.15)
+	end
 	if phaseX ~= phaseXTarget then
 		local dir = phaseXTarget > phaseX and 1 or -1
-		phaseX = math.clamp(phaseX + dir * 70 / 60, math.min(phaseX, phaseXTarget), math.max(phaseX, phaseXTarget))
+		local rate = (phaseXTarget - phaseX) > 40 and 78 or 26 -- 급접근은 빠르게, 평시는 스르륵
+		phaseX = math.clamp(phaseX + dir * rate / 60, math.min(phaseX, phaseXTarget), math.max(phaseX, phaseXTarget))
 	end
+	-- 거리 HUD 갱신
+	local dist = math.max(18, 330 - phaseX)
+	distText.Text = ("거리 %d"):format(math.floor(dist))
+	local frac = math.clamp(1 - (dist / 330), 0, 1)
+	foeIcon.Position = UDim2.new(1 - frac * 0.86, -12, 0.5, 0)
+	distText.TextColor3 = dist <= 45 and Color3.fromRGB(255, 130, 110)
+		or (dist <= 130 and Color3.fromRGB(255, 210, 120) or Color3.new(1, 1, 1))
 	local xf = CFrame.new(-phaseX, 0, 0) * ENEMY_CENTER * bob * ENEMY_CENTER:Inverse()
 	for p, base in enemyBase do
 		if p.Parent then p.CFrame = xf * base end
@@ -188,6 +215,39 @@ local fHull = bar(66, "🛡️ 선체", Color3.fromRGB(255, 150, 60))
 local fDeck = bar(86, "👥 갑판", Color3.fromRGB(255, 90, 90))
 local segTip = label({ AnchorPoint = Vector2.new(0.5, 0), Position = UDim2.new(0.5, 0, 0, 106),
 	Size = UDim2.new(0.6, 0, 0, 20), Text = "", TextColor3 = Color3.fromRGB(255, 230, 140) }, gui)
+
+-- 📏 거리 트랙 — 페이즈를 숫자로 끊지 않고 "가까워지는 거리"로 보여준다
+local distHolder = Instance.new("Frame")
+distHolder.AnchorPoint = Vector2.new(0.5, 0)
+distHolder.Position = UDim2.new(0.5, 0, 0, 128)
+distHolder.Size = UDim2.new(0.44, 0, 0, 22)
+distHolder.BackgroundColor3 = Color3.fromRGB(18, 26, 44)
+distHolder.BackgroundTransparency = 0.2
+distHolder.Parent = gui
+local dhc = Instance.new("UICorner"); dhc.CornerRadius = UDim.new(0, 11); dhc.Parent = distHolder
+-- 구간 마커 (총격전/백병전 진입선)
+for _, mark in { { at = 120, txt = "총격", col = Color3.fromRGB(255, 190, 80) },
+	{ at = 39, txt = "백병", col = Color3.fromRGB(255, 110, 90) } } do
+	local frac = 1 - (mark.at / 330)
+	local tick = Instance.new("Frame")
+	tick.AnchorPoint = Vector2.new(0.5, 0)
+	tick.Position = UDim2.fromScale(frac, 0)
+	tick.Size = UDim2.new(0, 2, 1, 0)
+	tick.BackgroundColor3 = mark.col
+	tick.BorderSizePixel = 0
+	tick.ZIndex = 3
+	tick.Parent = distHolder
+	label({ AnchorPoint = Vector2.new(0.5, 0), Position = UDim2.new(frac, 0, 1, 1),
+		Size = UDim2.fromOffset(56, 15), Text = mark.txt, TextColor3 = mark.col,
+		TextTransparency = 0.25 }, distHolder)
+end
+-- 아군함 아이콘(왼쪽 고정) → 적함 아이콘(거리에 따라 접근)
+local shipIcon = label({ AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.new(0, 12, 0.5, 0),
+	Size = UDim2.fromOffset(28, 20), Text = "⛵", ZIndex = 4 }, distHolder)
+local foeIcon = label({ AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.new(1, -12, 0.5, 0),
+	Size = UDim2.fromOffset(28, 20), Text = "🏴‍☠️", ZIndex = 4 }, distHolder)
+local distText = label({ Position = UDim2.fromScale(0, 0), Size = UDim2.fromScale(1, 1),
+	Text = "거리 330", ZIndex = 5, TextStrokeTransparency = 0.1 }, distHolder)
 
 -- 아군 선체
 label({ Position = UDim2.new(0, 14, 1, -96), Size = UDim2.new(0, 150, 0, 20),
@@ -280,6 +340,43 @@ chGui.AlwaysOnTop = true
 chGui.Parent = crosshair
 local chLabel = label({ Size = UDim2.fromScale(1, 1), Text = "" }, chGui)
 
+-- 포문 조준경: 조준점에 십자선 + 조준환 (대포를 겨눈다는 감각)
+local sightGui = Instance.new("BillboardGui")
+sightGui.Size = UDim2.fromScale(9, 9)
+sightGui.AlwaysOnTop = true
+sightGui.Parent = crosshair
+local function sightBar(sz, pos)
+	local f = Instance.new("Frame")
+	f.AnchorPoint = Vector2.new(0.5, 0.5)
+	f.Position = pos
+	f.Size = sz
+	f.BackgroundColor3 = Color3.fromRGB(255, 235, 120)
+	f.BorderSizePixel = 0
+	f.BackgroundTransparency = 0.15
+	f.Parent = sightGui
+	return f
+end
+local sightParts = {
+	sightBar(UDim2.fromScale(0.42, 0.035), UDim2.fromScale(0.22, 0.5)),
+	sightBar(UDim2.fromScale(0.42, 0.035), UDim2.fromScale(0.78, 0.5)),
+	sightBar(UDim2.fromScale(0.035, 0.42), UDim2.fromScale(0.5, 0.22)),
+	sightBar(UDim2.fromScale(0.035, 0.42), UDim2.fromScale(0.5, 0.78)),
+}
+local sightRing = Instance.new("Frame")
+sightRing.AnchorPoint = Vector2.new(0.5, 0.5)
+sightRing.Position = UDim2.fromScale(0.5, 0.5)
+sightRing.Size = UDim2.fromScale(0.34, 0.34)
+sightRing.BackgroundTransparency = 1
+sightRing.Parent = sightGui
+local ringStroke = Instance.new("UIStroke")
+ringStroke.Thickness = 3
+ringStroke.Color = Color3.fromRGB(255, 235, 120)
+ringStroke.Transparency = 0.1
+ringStroke.Parent = sightRing
+local ringCorner = Instance.new("UICorner")
+ringCorner.CornerRadius = UDim.new(1, 0)
+ringCorner.Parent = sightRing
+
 local SEG_KO = { Sail = "⛵ 돛", Hull = "🛡️ 선체", Deck = "👥 갑판" }
 local SEG_COLOR = {
 	Sail = Color3.fromRGB(80, 200, 255),
@@ -298,10 +395,13 @@ local function updateAim(screenPos)
 		aimPos = hit.Position
 		local seg = hit.Instance:GetAttribute("Seg") or "Hull"
 		crosshair.Position = hit.Position
-		crosshair.Transparency = 0.15
+		crosshair.Transparency = 0.55
 		crosshair.Color = SEG_COLOR[seg]
 		chLabel.Text = SEG_KO[seg]
 		chLabel.TextColor3 = SEG_COLOR[seg]
+		-- 조준경 색을 부위색으로 (조준선이 곧 부위 선택 UI)
+		ringStroke.Color = SEG_COLOR[seg]
+		for _, b in sightParts do b.BackgroundColor3 = SEG_COLOR[seg] end
 	end
 end
 
@@ -392,9 +492,11 @@ end
 
 local function flyBall(from, to, seg, dmg, delay)
 	task.delay(delay, function()
-		play(0.42 + math.random() * 0.1, 0.7) -- 발사 붐
-		burst(from, Color3.fromRGB(200, 200, 200), 14, 10) -- 포연
-		shake(0.5, 0.15)
+		play(0.42 + math.random() * 0.08, 0.7)               -- 발사 붐 (저음)
+		sfx(SFX.swoosh, 1.5 + math.random() * 0.3, 0.28)     -- 포탄 바람소리
+		burst(from, Color3.fromRGB(255, 200, 90), 10, 26)    -- 화염 플래시
+		burst(from, Color3.fromRGB(200, 200, 200), 16, 9)    -- 포연
+		shake(0.6, 0.16)
 		local ball = Instance.new("Part")
 		ball.Shape = Enum.PartType.Ball
 		ball.Size = Vector3.new(1.1, 1.1, 1.1)
@@ -429,8 +531,13 @@ local function flyBall(from, to, seg, dmg, delay)
 end
 
 RE_FireResult.OnClientEvent:Connect(function(data)
+	-- 조준선이 잠긴 순간의 반동 연출 (조준 → 일제사격)
+	sightRing.Size = UDim2.fromScale(0.6, 0.6)
+	TweenService:Create(sightRing, TweenInfo.new(0.45, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {
+		Size = UDim2.fromScale(0.34, 0.34) }):Play()
 	for i, shot in data.shots do
-		flyBall(shot.from, shot.to, shot.seg, shot.dmg, (i - 1) * 0.09)
+		-- 뒤쪽 포문부터 앞으로 훑으며 우르르 발사
+		flyBall(shot.from, shot.to, shot.seg, shot.dmg, (i - 1) * 0.13)
 	end
 end)
 
@@ -459,7 +566,9 @@ RE_Volley.OnClientEvent:Connect(function(data)
 		vignette.BackgroundTransparency = 0.82
 		braceBtn.BackgroundColor3 = Color3.fromRGB(255, 180, 40)
 		braceBtn.Text = "🛡️ 지금 브레이스!!"
-		ping(0.7, 0.8); ping(0.55, 0.8)
+		-- 경고: 낮은 북 2연타 (전자 비프 제거)
+		sfx(SFX.drum, 0.55, 0.75)
+		task.delay(0.32, function() sfx(SFX.drum, 0.62, 0.75) end)
 		task.delay(1.1, function()
 			for _, c in volleyGlow do
 				c.Material = Enum.Material.Metal
@@ -473,9 +582,12 @@ RE_Volley.OnClientEvent:Connect(function(data)
 		play(0.38, 1)
 		if data.grade == "perfect" then
 			shake(0.6, 0.25)
+			sfx(SFX.clang, 1.25, 0.85)   -- 완벽 방어: 금속에 튕기는 소리
+			sfx(SFX.clang, 0.9, 0.5)
 			showBanner("✨ PERFECT 브레이스!", ("피해 −80%%  (−%d)"):format(data.dmg), 1.6)
 		elseif data.grade == "brace" then
 			shake(1.4, 0.4)
+			sfx(SFX.clang, 0.75, 0.6)
 			showBanner("🛡️ 브레이스!", ("피해 −55%%  (−%d)"):format(data.dmg), 1.6)
 		else
 			shake(2.6, 0.7)
@@ -490,12 +602,13 @@ end)
 --------------------------------------------------------------------
 RE_Game.OnClientEvent:Connect(function(data)
 	if data.type == "captured" then
-		play(0.6, 1)
+		sfx(SFX.fanfare, 1, 0.8)
 		shake(1, 0.4)
 		showBanner("🏴‍☠️ 나포!!", "적함을 접수했다 — 보상 1.5배", 3.5)
 	elseif data.type == "sunk" then
 		sinkStart = os.clock()
-		play(0.3, 1)
+		sfx(SFX.fanfare, 0.9, 0.7)
+		sfx(SFX.splash, 0.4, 0.8)
 		shake(1.2, 0.6)
 		local bonus = {}
 		if data.sails then table.insert(bonus, "돛 완파") end
@@ -908,7 +1021,10 @@ for _, t in backpack:GetChildren() do
 end
 
 RE_Battle.OnClientEvent:Connect(function(data)
-	if data.type == "phase3" then
+	if data.type == "rescued" then
+		showBanner("🛟 구조됨", "갑판으로 복귀했습니다", 1.6)
+	elseif data.type == "phase3" then
+		driftStart = nil
 		phaseXTarget = 291
 		fireLabel = "⚔️ 백병전!"
 		for id in hooks do removeHook(id) end
@@ -943,6 +1059,7 @@ RE_Battle.OnClientEvent:Connect(function(data)
 	elseif data.type == "srPull" then
 		showBanner("✨ " .. data.who .. "님이 [슈퍼레어] " .. data.name .. " 영입!!", "선술집에서 모집 가능", 3.5)
 	elseif data.type == "phase2" then
+		driftStart = nil
 		phaseXTarget = 210
 		FIRE_CD = 1.2
 		fireLabel = "🎯 선회포"
@@ -979,6 +1096,7 @@ RE_Battle.OnClientEvent:Connect(function(data)
 		winPanel.Visible = false
 		phaseXTarget = 0
 		phaseX = 0
+		driftStart = os.clock() + 3 -- 카운트다운 후부터 접근 시작
 		FIRE_CD = 6.0
 		fireLabel = "💥 일제사격"
 		for id in hooks do removeHook(id) end
