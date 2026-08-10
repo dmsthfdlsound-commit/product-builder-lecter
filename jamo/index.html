@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>자모 사과게임 - 한글 단어 퍼즐</title>
+    <meta name="description" content="드래그로 자모를 묶어 단어를 만드는 2분 한글 퍼즐. 사과게임처럼 사각형을 그려 ㅁ·ㅜ·ㄹ을 물로 만들어보세요. 매일 바뀌는 오늘의 판과 연습 모드를 무료로 즐길 수 있습니다.">
+    <meta name="keywords" content="자모 게임, 한글 퍼즐, 사과게임, 단어 게임, 무료 웹게임, 한글 단어 퍼즐">
+    <meta property="og:type" content="website">
+    <meta property="og:title" content="자모 사과게임 - 한글 단어 퍼즐">
+    <meta property="og:description" content="드래그한 사각형 안의 자모로 단어를 만들면 사라집니다. 2분 안에 몇 점까지 낼 수 있을까요?">
+    <meta property="og:locale" content="ko_KR">
+    <meta name="theme-color" content="#101418">
+    <link rel="stylesheet" href="jamo.css">
+</head>
+<body>
+    <div class="app">
+        <header class="header">
+            <h1 class="logo"><span class="logo-tile">한</span>자모 사과게임</h1>
+            <p class="tagline">드래그해서 자모를 묶고, 단어를 만들어 지우세요</p>
+        </header>
+
+        <!-- 광고 슬롯 (상단): 애드센스/애드핏 승인 후 이 자리에 광고 코드를 붙여넣으세요 -->
+        <div class="ad-slot" id="ad-top" aria-hidden="true"></div>
+
+        <!-- 시작 화면 -->
+        <main class="card" id="start-screen">
+            <section class="rules">
+                <h2>규칙은 하나입니다</h2>
+                <p class="rule-lead">
+                    드래그한 <b>사각형 안의 자모를 전부 사용해</b> 단어를 만들 수 있으면 사라집니다.
+                    <b>순서는 상관없습니다.</b>
+                </p>
+                <div class="rule-demo" aria-label="예시: ㅜ, ㅁ, ㄹ 세 자모로 물이라는 단어를 만듭니다">
+                    <span class="demo-tile">ㅜ</span>
+                    <span class="demo-tile">ㅁ</span>
+                    <span class="demo-tile">ㄹ</span>
+                    <span class="demo-arrow">→</span>
+                    <span class="demo-word">물</span>
+                </div>
+                <ul class="rule-list">
+                    <li>제한 시간은 <b>2분</b>. 지운 자모 수만큼 점수가 오릅니다.</li>
+                    <li><b>긴 단어일수록 보너스</b>가 큽니다. 3자모는 3점, 6자모는 12점.</li>
+                    <li>지워진 칸은 <b>빈칸으로 남습니다.</b> 다음 사각형은 빈칸을 건너뛰고 묶을 수 있습니다.</li>
+                    <li>복합 모음은 쪼개져 있습니다. <b>ㅏ + ㅣ = ㅐ</b>, <b>ㅗ + ㅏ = ㅘ</b>, <b>ㄱ + ㄱ = ㄲ</b>.</li>
+                </ul>
+            </section>
+
+            <div class="stat-row">
+                <div class="stat"><span class="stat-label">최고 점수</span><strong id="best-score">-</strong></div>
+                <div class="stat"><span class="stat-label">연속 출석</span><strong id="streak">-</strong></div>
+                <div class="stat"><span class="stat-label">수록 단어</span><strong id="dict-size">-</strong></div>
+            </div>
+
+            <button type="button" class="primary-btn" id="start-daily">오늘의 판 시작</button>
+            <button type="button" class="ghost-btn" id="start-free">연습 모드 (무한 랜덤)</button>
+            <p class="hint-text">오늘의 판은 모두에게 똑같이 나옵니다. 매일 자정(KST)에 바뀝니다.</p>
+        </main>
+
+        <!-- 게임 화면 -->
+        <main class="card game-card" id="game-screen" hidden>
+            <div class="hud">
+                <div class="hud-left">
+                    <span class="hud-time" id="time">120</span>
+                    <span class="hud-unit">초</span>
+                </div>
+                <span class="mode-tag" id="mode-tag"></span>
+                <div class="hud-right">
+                    <span class="hud-score" id="score">0</span>
+                    <span class="hud-unit">점</span>
+                </div>
+            </div>
+            <div class="timebar"><div class="timebar-fill" id="timebar-fill"></div></div>
+
+            <div class="board-wrap">
+                <div class="board" id="board"></div>
+                <div class="selection" id="selection" hidden></div>
+            </div>
+
+            <p class="status" id="status">드래그해서 사각형을 그려보세요</p>
+
+            <div class="game-actions">
+                <button type="button" class="action-btn" id="hint-btn">힌트 3</button>
+                <button type="button" class="action-btn" id="give-up-btn">그만두기</button>
+            </div>
+        </main>
+
+        <!-- 결과 화면 -->
+        <section class="card end-card" id="end-screen" hidden aria-live="polite">
+            <h2 id="end-title">시간 종료</h2>
+            <p class="end-score"><strong id="end-score">0</strong><span>점</span></p>
+            <p class="end-detail" id="end-detail"></p>
+            <p class="end-best" id="end-best"></p>
+            <div class="end-words-box">
+                <h3>만든 단어</h3>
+                <p id="end-words"></p>
+            </div>
+            <p class="daily-note" id="daily-note" hidden>오늘의 판 기록이 저장되었습니다. 내일 새 판이 열립니다.</p>
+            <div class="end-actions">
+                <button type="button" class="primary-btn" id="again-btn">연습 한 판 더</button>
+                <button type="button" class="action-btn" id="share-btn">결과 공유</button>
+                <button type="button" class="action-btn" id="home-btn">처음으로</button>
+            </div>
+        </section>
+
+        <!-- 광고 슬롯 (하단): 애드센스/애드핏 승인 후 이 자리에 광고 코드를 붙여넣으세요 -->
+        <div class="ad-slot" id="ad-bottom" aria-hidden="true"></div>
+
+        <footer class="footer">
+            <p>순수 HTML·CSS·JS로 만든 무료 웹게임입니다. 설치도 로그인도 필요 없습니다.</p>
+            <p><a href="../index.html">로또 번호 생성기</a> · <a href="../privacy.html">개인정보처리방침</a></p>
+        </footer>
+    </div>
+
+    <div class="toast" id="toast" role="status"></div>
+    <script src="words.js"></script>
+    <script src="jamo.js"></script>
+</body>
+</html>
