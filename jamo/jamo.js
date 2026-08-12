@@ -705,7 +705,9 @@
             mulberry32: mulberry32, hashString: hashString,
             generateBoard: generateBoard, findSolutions: findSolutions,
         };
-    } else {
+    } else if (document.readyState === 'loading') {
         document.addEventListener('DOMContentLoaded', init);
+    } else {
+        init();
     }
 })();
