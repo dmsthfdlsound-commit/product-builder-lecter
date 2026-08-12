@@ -258,12 +258,19 @@
 
     const ROUND_SECONDS = 120;
     const HINT_LIMIT = 3;
+    const MODE_LABEL = { daily: '오늘의 판', free: '연습 모드', easy: '쉬움 모드' };
     const STORE = {
         best: 'jamo.best',
+        bestEasy: 'jamo.best.easy',
         daily: 'jamo.daily',
         streak: 'jamo.streak',
         lastDaily: 'jamo.lastDaily',
     };
+
+    /** 쉬움 모드는 최고 점수를 따로 적는다. 목록을 보고 낸 점수와 섞이면 기록이 의미를 잃는다. */
+    function bestKey(mode) {
+        return mode === 'easy' ? STORE.bestEasy : STORE.best;
+    }
 
     const state = {
         cells: null,
@@ -273,6 +280,7 @@
         cleared: 0,
         words: [],
         hintsLeft: HINT_LIMIT,
+        showWords: false,
         running: false,
         endsAt: 0,
         timerId: 0,
@@ -285,6 +293,7 @@
 
     const $ = function (id) { return document.getElementById(id); };
     let boardEl, overlayEl, scoreEl, timeEl, timebarEl, statusEl, hintBtn, toastEl;
+    let wordPanelEl, wordListEl, wordCountEl;
     const tileEls = [];
 
     let toastTimer = 0;
@@ -324,6 +333,54 @@
             tile.textContent = jamo === null ? '' : jamo;
             tile.className = jamo === null ? 'tile empty' : 'tile';
         }
+    }
+
+    /**
+     * 쉬움 모드의 단어 목록.
+     * 판이 바뀔 때마다 다시 계산하므로 "지금 이 판에서 실제로 만들 수 있는 단어"만 남는다.
+     * 하나를 지우면 그 자모를 함께 쓰던 다른 단어들도 같이 사라진다.
+     */
+    function renderWordList() {
+        if (!state.showWords) return;
+
+        const words = Array.from(new Set(findSolutions(state.cells, 0).map(function (s) { return s.word; })));
+        // 점수가 큰 긴 단어를 위에 둔다. 짧은 단어는 어차피 거의 항상 만들 수 있어 목표가 못 된다.
+        words.sort(function (a, b) {
+            const diff = decompose(b).length - decompose(a).length;
+            return diff !== 0 ? diff : a.localeCompare(b, 'ko');
+        });
+        wordCountEl.textContent = words.length;
+
+        if (!words.length) {
+            wordListEl.replaceChildren(
+                Object.assign(document.createElement('span'), {
+                    className: 'word-empty',
+                    textContent: '더 만들 수 있는 단어가 없습니다',
+                }));
+            return;
+        }
+
+        const frag = document.createDocumentFragment();
+        words.forEach(function (word) {
+            const chip = document.createElement('span');
+            chip.className = 'word-chip len-' + decompose(word).length;
+            chip.textContent = word;
+            frag.appendChild(chip);
+        });
+        wordListEl.replaceChildren(frag);
+    }
+
+    /** 방금 맞힌 단어를 목록에서 지워지는 것처럼 보여준 뒤 목록을 새로 그린다. */
+    function markWordFound(word) {
+        if (!state.showWords) return;
+        const chips = wordListEl.children;
+        for (let i = 0; i < chips.length; i++) {
+            if (chips[i].textContent === word) {
+                chips[i].classList.add('found');
+                break;
+            }
+        }
+        setTimeout(renderWordList, 340);
     }
 
     // ─────────────────────────────────────────────────────────
@@ -467,6 +524,7 @@
 
         scoreEl.textContent = state.score;
         floatWord(area, info.word, gained);
+        markWordFound(info.word);
 
         if (!findSolutions(state.cells, 1).length) {
             setTimeout(function () { endGame('nomoves'); }, 400);
@@ -521,6 +579,7 @@
         state.words = [];
         state.hintsLeft = HINT_LIMIT;
         state.drag = null;
+        state.showWords = mode === 'easy';
 
         const seed = mode === 'daily'
             ? hashString('jamo-' + state.dateKey)
@@ -542,11 +601,17 @@
         hintBtn.textContent = '힌트 ' + HINT_LIMIT;
         hintBtn.disabled = false;
 
+        wordPanelEl.hidden = !state.showWords;
+        renderWordList();
+
         $('start-screen').hidden = true;
         $('end-screen').hidden = true;
         $('game-screen').hidden = false;
-        $('mode-tag').textContent = mode === 'daily' ? '오늘의 판 · ' + state.dateKey : '연습 모드';
+        $('mode-tag').textContent = mode === 'daily'
+            ? MODE_LABEL.daily + ' · ' + state.dateKey
+            : MODE_LABEL[mode];
 
+        document.body.classList.add('playing');
         state.running = true;
         state.endsAt = performance.now() + ROUND_SECONDS * 1000;
         clearInterval(state.timerId);
@@ -568,10 +633,12 @@
         state.running = false;
         clearInterval(state.timerId);
         clearHighlight();
+        document.body.classList.remove('playing');
 
-        const best = readNumber(STORE.best);
+        const key = bestKey(state.mode);
+        const best = readNumber(key);
         const isBest = state.score > best;
-        if (isBest) localStorage.setItem(STORE.best, String(state.score));
+        if (isBest) localStorage.setItem(key, String(state.score));
 
         if (state.mode === 'daily') recordDaily();
 
@@ -584,13 +651,13 @@
         $('end-detail').textContent =
             '자모 ' + state.cleared + '개 · 단어 ' + state.words.length + '개' +
             (longest ? ' · 최장 「' + longest + '」' : '');
-        $('end-best').textContent = isBest
-            ? '🎉 최고 기록 경신!'
-            : '최고 기록 ' + Math.max(best, state.score) + '점';
+        $('end-best').textContent = (isBest ? '🎉 최고 기록 경신!' : '최고 기록 ' + best + '점')
+            + (state.mode === 'easy' ? ' (쉬움 모드 기준)' : '');
         $('end-words').textContent = state.words.length
             ? state.words.join(', ')
             : '이번 판에서는 한 단어도 만들지 못했습니다.';
         $('game-screen').hidden = true;
+        $('again-btn').textContent = state.mode === 'easy' ? '쉬움 모드 한 판 더' : '연습 한 판 더';
         $('end-screen').hidden = false;
         $('daily-note').hidden = state.mode !== 'daily';
         window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -625,7 +692,8 @@
             return decompose(b).length > decompose(a || '').length ? b : a;
         }, '');
         const lines = [
-            '자모 사과게임' + (state.mode === 'daily' ? ' · 오늘의 판 (' + state.dateKey + ')' : ''),
+            '자모 사과게임 · ' + MODE_LABEL[state.mode] +
+            (state.mode === 'daily' ? ' (' + state.dateKey + ')' : ''),
             tierEmoji(state.score) + ' ' + state.score + '점 · 단어 ' + state.words.length + '개' +
             (longest ? ' · 최장 「' + longest + '」' : ''),
             location.origin + location.pathname,
@@ -648,8 +716,10 @@
 
     function refreshStartScreen() {
         const best = readNumber(STORE.best);
+        const easy = readNumber(STORE.bestEasy);
         const streak = readNumber(STORE.streak);
         $('best-score').textContent = best ? best + '점' : '-';
+        $('best-easy').textContent = easy ? easy + '점' : '-';
         $('streak').textContent = streak ? streak + '일' : '-';
 
         const played = localStorage.getItem(STORE.daily + '.' + todayKST());
@@ -669,6 +739,9 @@
         statusEl = $('status');
         hintBtn = $('hint-btn');
         toastEl = $('toast');
+        wordPanelEl = $('word-panel');
+        wordListEl = $('word-list');
+        wordCountEl = $('word-count');
 
         buildBoardDom();
         refreshStartScreen();
@@ -679,9 +752,13 @@
         boardEl.addEventListener('pointercancel', onPointerUp);
         boardEl.addEventListener('contextmenu', function (e) { e.preventDefault(); });
 
+        $('start-easy').addEventListener('click', function () { startGame('easy'); });
         $('start-daily').addEventListener('click', function () { startGame('daily'); });
         $('start-free').addEventListener('click', function () { startGame('free'); });
-        $('again-btn').addEventListener('click', function () { startGame('free'); });
+        // 한 판 더는 방금 하던 모드를 그대로 이어간다 (오늘의 판은 하루 한 번이라 연습으로).
+        $('again-btn').addEventListener('click', function () {
+            startGame(state.mode === 'daily' ? 'free' : state.mode);
+        });
         $('share-btn').addEventListener('click', shareResult);
         $('home-btn').addEventListener('click', function () {
             $('end-screen').hidden = true;

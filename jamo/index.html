@@ -48,13 +48,14 @@
 
             <div class="stat-row">
                 <div class="stat"><span class="stat-label">최고 점수</span><strong id="best-score">-</strong></div>
+                <div class="stat"><span class="stat-label">쉬움 최고</span><strong id="best-easy">-</strong></div>
                 <div class="stat"><span class="stat-label">연속 출석</span><strong id="streak">-</strong></div>
-                <div class="stat"><span class="stat-label">수록 단어</span><strong id="dict-size">-</strong></div>
             </div>
 
-            <button type="button" class="primary-btn" id="start-daily">오늘의 판 시작</button>
+            <button type="button" class="primary-btn" id="start-easy">쉬움 모드 · 정답 단어 보면서 하기</button>
+            <button type="button" class="ghost-btn" id="start-daily">오늘의 판 (모두 같은 판)</button>
             <button type="button" class="ghost-btn" id="start-free">연습 모드 (무한 랜덤)</button>
-            <p class="hint-text">오늘의 판은 모두에게 똑같이 나옵니다. 매일 자정(KST)에 바뀝니다.</p>
+            <p class="hint-text">처음이라면 쉬움 모드부터. 만들 수 있는 단어가 판 아래에 다 적혀 있고, 하나씩 지울 때마다 목록에서 사라집니다.<br>오늘의 판은 모두에게 똑같이 나오며 매일 자정(KST)에 바뀝니다. 수록 단어 <span id="dict-size">-</span>개.</p>
         </main>
 
         <!-- 게임 화면 -->
@@ -78,6 +79,14 @@
             </div>
 
             <p class="status" id="status">드래그해서 사각형을 그려보세요</p>
+
+            <section class="word-panel" id="word-panel" hidden aria-label="지금 만들 수 있는 단어">
+                <div class="word-panel-head">
+                    <span>지금 만들 수 있는 단어</span>
+                    <strong id="word-count">0</strong>
+                </div>
+                <div class="word-list" id="word-list"></div>
+            </section>
 
             <div class="game-actions">
                 <button type="button" class="action-btn" id="hint-btn">힌트 3</button>

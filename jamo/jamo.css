@@ -41,6 +41,11 @@ body {
 
 .header { text-align: center; }
 
+/* 판·목록·버튼이 한 화면에 들어가야 하므로 게임 중에는 제목을 접는다. */
+body.playing .header,
+body.playing .ad-slot,
+body.playing .footer { display: none; }
+
 .logo {
     display: inline-flex;
     align-items: center;
@@ -202,6 +207,8 @@ body {
 .ghost-btn:hover { filter: brightness(1.08); }
 .primary-btn:active,
 .ghost-btn:active { transform: translateY(1px); }
+
+.ghost-btn + .ghost-btn { margin-top: 0.5rem; }
 
 .hint-text {
     margin: 0.9rem 0 0;
@@ -398,6 +405,79 @@ body {
 .status.ok {
     color: var(--ok);
     font-weight: 700;
+}
+
+/* ── 쉬움 모드 단어 목록 ──────────────────── */
+
+.word-panel {
+    margin-bottom: 0.8rem;
+    padding: 0.6rem 0.7rem;
+    background: #141a21;
+    border: 1px solid var(--card-border);
+    border-radius: 12px;
+}
+
+.word-panel-head {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    margin-bottom: 0.5rem;
+    font-size: 0.75rem;
+    color: var(--text-dim);
+}
+
+.word-panel-head strong {
+    color: var(--accent);
+    font-size: 0.95rem;
+    font-variant-numeric: tabular-nums;
+}
+
+.word-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.3rem;
+    max-height: 5.2rem;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+}
+
+.word-chip {
+    padding: 0.22rem 0.5rem;
+    border-radius: 7px;
+    background: #222c38;
+    border: 1px solid #33404f;
+    color: var(--text-dim);
+    font-size: 0.82rem;
+    line-height: 1.3;
+    white-space: nowrap;
+}
+
+/* 긴 단어일수록 점수가 크다 — 목록에서도 그게 보이게 */
+.word-chip.len-4,
+.word-chip.len-5 { color: var(--text); }
+
+.word-chip.len-6 {
+    color: var(--accent);
+    border-color: var(--accent-strong);
+}
+
+.word-chip.found {
+    background: var(--ok-dim);
+    border-color: var(--ok);
+    color: #eaffef;
+    text-decoration: line-through;
+    animation: chip-found 0.34s ease-out forwards;
+}
+
+@keyframes chip-found {
+    0%   { transform: scale(1); }
+    35%  { transform: scale(1.12); }
+    100% { transform: scale(0.9); opacity: 0; }
+}
+
+.word-empty {
+    color: var(--text-dim);
+    font-size: 0.82rem;
 }
 
 .game-actions,
