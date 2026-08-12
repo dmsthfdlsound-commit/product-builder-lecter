@@ -244,11 +244,74 @@ body.playing .footer { display: none; }
     margin-left: 0.15rem;
 }
 
+.hud-mid {
+    flex: 1;
+    min-width: 0;
+    text-align: center;
+}
+
 .mode-tag {
     font-size: 0.75rem;
     color: var(--text-dim);
-    text-align: center;
-    flex: 1;
+}
+
+.hud-score.bump { animation: score-bump 0.28s ease-out; }
+
+@keyframes score-bump {
+    0%   { transform: scale(1); }
+    40%  { transform: scale(1.22); }
+    100% { transform: scale(1); }
+}
+
+/* ── 콤보 ───────────────────────────────── */
+
+/* display를 지정하면 hidden 속성이 무시되므로 명시적으로 되돌린다. */
+.combo[hidden] { display: none; }
+
+.combo {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.25rem;
+}
+
+.combo-text {
+    font-size: 0.78rem;
+    color: var(--text-dim);
+    white-space: nowrap;
+}
+
+.combo-text.hot {
+    color: var(--accent);
+    font-weight: 700;
+}
+
+.combo-bar {
+    display: block;
+    width: min(7rem, 100%);
+    height: 3px;
+    border-radius: 2px;
+    background: #2b3644;
+    overflow: hidden;
+}
+
+.combo-bar-fill {
+    display: block;
+    height: 100%;
+    background: linear-gradient(90deg, #ff8a3d, var(--accent));
+    transition: width 0.1s linear;
+}
+
+.float-word.boosted {
+    border-color: var(--accent);
+    box-shadow: 0 0 20px rgba(230, 170, 40, 0.35);
+}
+
+.float-word i {
+    font-style: normal;
+    font-size: 0.8rem;
+    font-weight: 700;
+    color: #ffb84d;
 }
 
 .timebar {
@@ -379,6 +442,8 @@ body.playing .footer { display: none; }
     border-radius: 10px;
     background: rgba(16, 20, 24, 0.92);
     border: 1px solid var(--ok);
+    /* 남은 공간에 맞춰 줄어들면 판 가장자리에서 글자가 세로로 눌린다. */
+    width: max-content;
     white-space: nowrap;
     animation: float-up 0.9s ease-out forwards;
     z-index: 3;

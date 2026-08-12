@@ -258,6 +258,8 @@
 
     const ROUND_SECONDS = 120;
     const HINT_LIMIT = 3;
+    const COMBO_WINDOW = 3000;   // 직전 제거로부터 이 시간 안에 또 지우면 콤보가 이어진다
+    const COMBO_MAX_MULT = 3;
     const MODE_LABEL = { daily: '오늘의 판', free: '연습 모드', easy: '쉬움 모드' };
     const STORE = {
         best: 'jamo.best',
@@ -279,6 +281,9 @@
         score: 0,
         cleared: 0,
         words: [],
+        combo: 0,
+        maxCombo: 0,
+        lastClearAt: 0,
         hintsLeft: HINT_LIMIT,
         showWords: false,
         running: false,
@@ -294,6 +299,7 @@
     const $ = function (id) { return document.getElementById(id); };
     let boardEl, overlayEl, scoreEl, timeEl, timebarEl, statusEl, hintBtn, toastEl;
     let wordPanelEl, wordListEl, wordCountEl;
+    let comboEl, comboTextEl, comboBarEl, modeTagEl;
     const tileEls = [];
 
     let toastTimer = 0;
@@ -506,8 +512,44 @@
         return size + Math.max(0, size - 3) * 2;
     }
 
+    /** 1콤보는 배수 없음. 이후 한 단계마다 0.5씩 붙고 ×3에서 멈춘다. */
+    function comboMultiplier(combo) {
+        if (combo < 2) return 1;
+        return Math.min(COMBO_MAX_MULT, 1 + (combo - 1) * 0.5);
+    }
+
+    function formatMultiplier(mult) {
+        return '×' + (mult % 1 === 0 ? mult : mult.toFixed(1));
+    }
+
+    /** 콤보 창이 열려 있는 동안 남은 시간을 막대로 보여준다. 닫히면 모드 이름으로 돌아간다. */
+    function renderCombo(now) {
+        const left = state.combo > 0 ? COMBO_WINDOW - (now - state.lastClearAt) : 0;
+        if (left <= 0) {
+            if (state.combo > 0) state.combo = 0;
+            comboEl.hidden = true;
+            modeTagEl.hidden = false;
+            return;
+        }
+        const mult = comboMultiplier(state.combo);
+        comboTextEl.textContent = state.combo < 2
+            ? '3초 안에 하나 더!'
+            : '🔥 ' + state.combo + '콤보 ' + formatMultiplier(mult);
+        comboTextEl.classList.toggle('hot', state.combo >= 2);
+        comboBarEl.style.width = (left / COMBO_WINDOW * 100) + '%';
+        comboEl.hidden = false;
+        modeTagEl.hidden = true;
+    }
+
     function acceptWord(area, info) {
-        const gained = scoreFor(info.indices.length);
+        const now = performance.now();
+        const chained = state.combo > 0 && (now - state.lastClearAt) <= COMBO_WINDOW;
+        state.combo = chained ? state.combo + 1 : 1;
+        state.lastClearAt = now;
+        state.maxCombo = Math.max(state.maxCombo, state.combo);
+
+        const mult = comboMultiplier(state.combo);
+        const gained = Math.round(scoreFor(info.indices.length) * mult);
         state.score += gained;
         state.cleared += info.indices.length;
         state.words.push(info.word);
@@ -523,7 +565,11 @@
         });
 
         scoreEl.textContent = state.score;
-        floatWord(area, info.word, gained);
+        scoreEl.classList.remove('bump');
+        void scoreEl.offsetWidth;   // 연속으로 터뜨려도 애니메이션이 다시 시작되도록
+        scoreEl.classList.add('bump');
+        renderCombo(now);
+        floatWord(area, info.word, gained, mult);
         markWordFound(info.word);
 
         if (!findSolutions(state.cells, 1).length) {
@@ -531,14 +577,17 @@
         }
     }
 
-    function floatWord(area, word, gained) {
+    function floatWord(area, word, gained, mult) {
         const rect = boardEl.getBoundingClientRect();
         const cw = rect.width / COLS;
         const ch = rect.height / ROWS;
         const label = document.createElement('div');
-        label.className = 'float-word';
-        label.innerHTML = '<b>' + word + '</b><em>+' + gained + '</em>';
-        label.style.left = ((area.c1 + (area.c2 - area.c1 + 1) / 2) * cw) + 'px';
+        label.className = 'float-word' + (mult > 1 ? ' boosted' : '');
+        label.innerHTML = '<b>' + word + '</b><em>+' + gained + '</em>' +
+            (mult > 1 ? '<i>' + formatMultiplier(mult) + '</i>' : '');
+        // 가장자리에서 지워도 라벨이 판 밖으로 나가지 않도록 중심을 안쪽으로 당긴다.
+        const centerX = (area.c1 + (area.c2 - area.c1 + 1) / 2) * cw;
+        label.style.left = Math.min(Math.max(centerX, rect.width * 0.18), rect.width * 0.82) + 'px';
         label.style.top = ((area.r1 + (area.r2 - area.r1 + 1) / 2) * ch) + 'px';
         boardEl.parentNode.appendChild(label);
         setTimeout(function () { label.remove(); }, 900);
@@ -577,6 +626,9 @@
         state.score = 0;
         state.cleared = 0;
         state.words = [];
+        state.combo = 0;
+        state.maxCombo = 0;
+        state.lastClearAt = 0;
         state.hintsLeft = HINT_LIMIT;
         state.drag = null;
         state.showWords = mode === 'easy';
@@ -620,7 +672,9 @@
     }
 
     function tick() {
-        const left = Math.max(0, state.endsAt - performance.now());
+        const now = performance.now();
+        renderCombo(now);
+        const left = Math.max(0, state.endsAt - now);
         const seconds = left / 1000;
         timeEl.textContent = Math.ceil(seconds);
         timebarEl.style.width = (left / (ROUND_SECONDS * 1000) * 100) + '%';
@@ -633,6 +687,8 @@
         state.running = false;
         clearInterval(state.timerId);
         clearHighlight();
+        state.combo = 0;
+        renderCombo(performance.now());
         document.body.classList.remove('playing');
 
         const key = bestKey(state.mode);
@@ -650,6 +706,7 @@
         $('end-score').textContent = state.score;
         $('end-detail').textContent =
             '자모 ' + state.cleared + '개 · 단어 ' + state.words.length + '개' +
+            (state.maxCombo >= 2 ? ' · 최고 ' + state.maxCombo + '콤보' : '') +
             (longest ? ' · 최장 「' + longest + '」' : '');
         $('end-best').textContent = (isBest ? '🎉 최고 기록 경신!' : '최고 기록 ' + best + '점')
             + (state.mode === 'easy' ? ' (쉬움 모드 기준)' : '');
@@ -695,6 +752,7 @@
             '자모 사과게임 · ' + MODE_LABEL[state.mode] +
             (state.mode === 'daily' ? ' (' + state.dateKey + ')' : ''),
             tierEmoji(state.score) + ' ' + state.score + '점 · 단어 ' + state.words.length + '개' +
+            (state.maxCombo >= 2 ? ' · 🔥' + state.maxCombo + '콤보' : '') +
             (longest ? ' · 최장 「' + longest + '」' : ''),
             location.origin + location.pathname,
         ];
@@ -742,6 +800,10 @@
         wordPanelEl = $('word-panel');
         wordListEl = $('word-list');
         wordCountEl = $('word-count');
+        comboEl = $('combo');
+        comboTextEl = $('combo-text');
+        comboBarEl = $('combo-bar-fill');
+        modeTagEl = $('mode-tag');
 
         buildBoardDom();
         refreshStartScreen();
@@ -779,6 +841,7 @@
         module.exports = {
             BASIC: BASIC, COLS: COLS, ROWS: ROWS, DICT: DICT, BY_LEN: BY_LEN,
             decompose: decompose, keyFromJamo: keyFromJamo, scoreFor: scoreFor,
+            comboMultiplier: comboMultiplier, COMBO_WINDOW: COMBO_WINDOW,
             mulberry32: mulberry32, hashString: hashString,
             generateBoard: generateBoard, findSolutions: findSolutions,
         };

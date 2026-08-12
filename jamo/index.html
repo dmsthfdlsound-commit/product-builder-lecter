@@ -41,6 +41,7 @@
                 <ul class="rule-list">
                     <li>제한 시간은 <b>2분</b>. 지운 자모 수만큼 점수가 오릅니다.</li>
                     <li><b>긴 단어일수록 보너스</b>가 큽니다. 3자모는 3점, 6자모는 12점.</li>
+                    <li><b>3초 안에 이어서 지우면 콤보</b>가 쌓입니다. 배점이 ×1.5 → ×2 → ×2.5 → 최대 <b>×3</b>까지 오릅니다.</li>
                     <li>지워진 칸은 <b>빈칸으로 남습니다.</b> 다음 사각형은 빈칸을 건너뛰고 묶을 수 있습니다.</li>
                     <li>복합 모음은 쪼개져 있습니다. <b>ㅏ + ㅣ = ㅐ</b>, <b>ㅗ + ㅏ = ㅘ</b>, <b>ㄱ + ㄱ = ㄲ</b>.</li>
                 </ul>
@@ -65,7 +66,13 @@
                     <span class="hud-time" id="time">120</span>
                     <span class="hud-unit">초</span>
                 </div>
-                <span class="mode-tag" id="mode-tag"></span>
+                <div class="hud-mid">
+                    <span class="mode-tag" id="mode-tag"></span>
+                    <div class="combo" id="combo" hidden>
+                        <span class="combo-text" id="combo-text"></span>
+                        <span class="combo-bar"><span class="combo-bar-fill" id="combo-bar-fill"></span></span>
+                    </div>
+                </div>
                 <div class="hud-right">
                     <span class="hud-score" id="score">0</span>
                     <span class="hud-unit">점</span>
