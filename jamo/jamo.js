@@ -253,6 +253,65 @@
     }
 
     // ─────────────────────────────────────────────────────────
+    // 소리 — 파일 없이 WebAudio로 직접 만든다
+    // ─────────────────────────────────────────────────────────
+
+    const Sound = (function () {
+        let ctx = null;
+        let master = null;
+        let enabled = true;
+
+        function ensure() {
+            if (ctx) return ctx;
+            const AudioCtx = window.AudioContext || window.webkitAudioContext;
+            if (!AudioCtx) return null;
+            ctx = new AudioCtx();
+            master = ctx.createGain();
+            master.gain.value = 0.16;
+            master.connect(ctx.destination);
+            return ctx;
+        }
+
+        function blip(freq, dur, type, vol) {
+            if (!enabled) return;
+            const c = ensure();
+            if (!c) return;
+            if (c.state === 'suspended') c.resume();
+
+            const osc = c.createOscillator();
+            const gain = c.createGain();
+            osc.type = type;
+            osc.frequency.setValueAtTime(freq, c.currentTime);
+            gain.gain.setValueAtTime(0.0001, c.currentTime);
+            gain.gain.linearRampToValueAtTime(vol, c.currentTime + 0.008);
+            gain.gain.exponentialRampToValueAtTime(0.0001, c.currentTime + dur);
+            osc.connect(gain);
+            gain.connect(master);
+            osc.start();
+            osc.stop(c.currentTime + dur + 0.02);
+        }
+
+        return {
+            unlock: ensure,
+            setEnabled: function (on) { enabled = on; if (on) ensure(); },
+            isEnabled: function () { return enabled; },
+            /** 콤보가 쌓일수록 음이 올라간다 — 귀로도 배수가 오르는 게 느껴지도록. */
+            clear: function (combo) {
+                const step = Math.min(combo - 1, 8) * 2;
+                const ratio = Math.pow(2, step / 12);
+                blip(523 * ratio, 0.15, 'triangle', 0.85);
+                blip(784 * ratio, 0.11, 'sine', 0.35);
+            },
+            tick: function () { blip(1046, 0.05, 'square', 0.16); },
+            lastTick: function () { blip(1568, 0.07, 'square', 0.3); },
+            end: function () {
+                blip(392, 0.18, 'sawtooth', 0.5);
+                setTimeout(function () { blip(262, 0.5, 'sawtooth', 0.5); }, 150);
+            },
+        };
+    })();
+
+    // ─────────────────────────────────────────────────────────
     // 게임 상태
     // ─────────────────────────────────────────────────────────
 
@@ -267,6 +326,7 @@
         daily: 'jamo.daily',
         streak: 'jamo.streak',
         lastDaily: 'jamo.lastDaily',
+        sound: 'jamo.sound',
     };
 
     /** 쉬움 모드는 최고 점수를 따로 적는다. 목록을 보고 낸 점수와 섞이면 기록이 의미를 잃는다. */
@@ -286,6 +346,10 @@
         lastClearAt: 0,
         hintsLeft: HINT_LIMIT,
         showWords: false,
+        tier: '',
+        lastShownSecond: -1,
+        shownScore: 0,
+        scoreAnim: 0,
         running: false,
         endsAt: 0,
         timerId: 0,
@@ -300,6 +364,7 @@
     let boardEl, overlayEl, scoreEl, timeEl, timebarEl, statusEl, hintBtn, toastEl;
     let wordPanelEl, wordListEl, wordCountEl;
     let comboEl, comboTextEl, comboBarEl, modeTagEl;
+    let timebarWrapEl, vignetteEl, boardWrapEl, soundBtn;
     const tileEls = [];
 
     let toastTimer = 0;
@@ -526,7 +591,10 @@
     function renderCombo(now) {
         const left = state.combo > 0 ? COMBO_WINDOW - (now - state.lastClearAt) : 0;
         if (left <= 0) {
-            if (state.combo > 0) state.combo = 0;
+            if (state.combo > 0) {
+                state.combo = 0;
+                applyComboGlow();
+            }
             comboEl.hidden = true;
             modeTagEl.hidden = false;
             return;
@@ -564,17 +632,67 @@
             }, 190);
         });
 
-        scoreEl.textContent = state.score;
+        rollScore(state.score);
         scoreEl.classList.remove('bump');
         void scoreEl.offsetWidth;   // 연속으로 터뜨려도 애니메이션이 다시 시작되도록
         scoreEl.classList.add('bump');
         renderCombo(now);
+        applyComboGlow();
         floatWord(area, info.word, gained, mult);
+        burst(info.indices, state.combo);
         markWordFound(info.word);
+        Sound.clear(state.combo);
 
         if (!findSolutions(state.cells, 1).length) {
             setTimeout(function () { endGame('nomoves'); }, 400);
         }
+    }
+
+    /** 점수를 툭 바꾸지 않고 굴려 올린다. 올라가는 게 보여야 보상처럼 느껴진다. */
+    function rollScore(target) {
+        cancelAnimationFrame(state.scoreAnim);
+        const from = state.shownScore;
+        const start = performance.now();
+        const duration = 260;
+
+        (function step(now) {
+            const t = Math.min(1, (now - start) / duration);
+            const eased = 1 - Math.pow(1 - t, 3);
+            state.shownScore = Math.round(from + (target - from) * eased);
+            scoreEl.textContent = state.shownScore;
+            if (t < 1) state.scoreAnim = requestAnimationFrame(step);
+        })(start);
+    }
+
+    /** 콤보가 높을수록 판 전체가 달아오른다. */
+    function applyComboGlow() {
+        const level = state.combo >= 5 ? 3 : state.combo >= 3 ? 2 : state.combo >= 2 ? 1 : 0;
+        boardWrapEl.className = 'board-wrap' + (level ? ' heat-' + level : '');
+    }
+
+    /** 지운 자리에서 조각이 튀어나간다. */
+    function burst(indices, combo) {
+        const rect = boardEl.getBoundingClientRect();
+        const cw = rect.width / COLS;
+        const ch = rect.height / ROWS;
+        const pieces = combo >= 3 ? 4 : 3;
+
+        indices.forEach(function (idx) {
+            const cx = (idx % COLS + 0.5) * cw;
+            const cy = (Math.floor(idx / COLS) + 0.5) * ch;
+            for (let i = 0; i < pieces; i++) {
+                const dot = document.createElement('span');
+                const angle = (Math.PI * 2 * i) / pieces + Math.random();
+                const dist = 18 + Math.random() * 22;
+                dot.className = 'spark' + (combo >= 2 ? ' hot' : '');
+                dot.style.left = cx + 'px';
+                dot.style.top = cy + 'px';
+                dot.style.setProperty('--dx', Math.cos(angle) * dist + 'px');
+                dot.style.setProperty('--dy', Math.sin(angle) * dist + 'px');
+                boardWrapEl.appendChild(dot);
+                setTimeout(function () { dot.remove(); }, 520);
+            }
+        });
     }
 
     function floatWord(area, word, gained, mult) {
@@ -649,7 +767,13 @@
         paintBoard();
         clearHighlight();
         setStatus([], null);
+        state.tier = '';
+        state.lastShownSecond = -1;
+        state.shownScore = 0;
+        cancelAnimationFrame(state.scoreAnim);
         scoreEl.textContent = '0';
+        applyComboGlow();
+        Sound.unlock();   // 시작 버튼 클릭이 곧 오디오 사용자 제스처
         hintBtn.textContent = '힌트 ' + HINT_LIMIT;
         hintBtn.disabled = false;
 
@@ -671,14 +795,44 @@
         tick();
     }
 
+    /** 남은 시간이 줄수록 색과 움직임을 단계적으로 조인다. */
+    function timeTier(seconds) {
+        if (seconds > 60) return 'calm';
+        if (seconds > 30) return 'warn';
+        if (seconds > 10) return 'urgent';
+        return 'critical';
+    }
+
     function tick() {
         const now = performance.now();
         renderCombo(now);
+
         const left = Math.max(0, state.endsAt - now);
         const seconds = left / 1000;
-        timeEl.textContent = Math.ceil(seconds);
+        const shown = Math.ceil(seconds);
+
+        timeEl.textContent = shown;
         timebarEl.style.width = (left / (ROUND_SECONDS * 1000) * 100) + '%';
-        timebarEl.classList.toggle('urgent', seconds <= 15);
+
+        const tier = timeTier(seconds);
+        if (tier !== state.tier) {
+            state.tier = tier;
+            timebarWrapEl.className = 'timebar ' + tier;
+            timeEl.className = 'hud-time ' + tier;
+            vignetteEl.className = 'vignette ' + tier;
+        }
+
+        // 마지막 10초는 1초마다 숫자가 뛰고 소리가 난다.
+        if (shown !== state.lastShownSecond) {
+            state.lastShownSecond = shown;
+            if (shown <= 10 && shown > 0) {
+                timeEl.classList.remove('beat');
+                void timeEl.offsetWidth;
+                timeEl.classList.add('beat');
+                if (shown <= 3) Sound.lastTick(); else Sound.tick();
+            }
+        }
+
         if (left <= 0) endGame('timeup');
     }
 
@@ -689,7 +843,15 @@
         clearHighlight();
         state.combo = 0;
         renderCombo(performance.now());
+        applyComboGlow();
+        cancelAnimationFrame(state.scoreAnim);
+        scoreEl.textContent = state.score;
+        timebarWrapEl.className = 'timebar';
+        timeEl.className = 'hud-time';
+        vignetteEl.className = 'vignette';
+        state.tier = '';
         document.body.classList.remove('playing');
+        Sound.end();
 
         const key = bestKey(state.mode);
         const best = readNumber(key);
@@ -804,6 +966,10 @@
         comboTextEl = $('combo-text');
         comboBarEl = $('combo-bar-fill');
         modeTagEl = $('mode-tag');
+        timebarWrapEl = $('timebar');
+        vignetteEl = $('vignette');
+        boardWrapEl = boardEl.parentNode;
+        soundBtn = $('sound-btn');
 
         buildBoardDom();
         refreshStartScreen();
@@ -829,6 +995,16 @@
             refreshStartScreen();
         });
         hintBtn.addEventListener('click', useHint);
+
+        Sound.setEnabled(localStorage.getItem(STORE.sound) !== 'off');
+        soundBtn.textContent = Sound.isEnabled() ? '🔊' : '🔇';
+        soundBtn.addEventListener('click', function () {
+            const on = !Sound.isEnabled();
+            Sound.setEnabled(on);
+            localStorage.setItem(STORE.sound, on ? 'on' : 'off');
+            soundBtn.textContent = on ? '🔊' : '🔇';
+            if (on) Sound.tick();
+        });
         $('give-up-btn').addEventListener('click', function () { endGame('timeup'); });
 
         window.addEventListener('resize', function () {

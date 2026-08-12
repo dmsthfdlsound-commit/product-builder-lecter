@@ -78,7 +78,7 @@
                     <span class="hud-unit">점</span>
                 </div>
             </div>
-            <div class="timebar"><div class="timebar-fill" id="timebar-fill"></div></div>
+            <div class="timebar" id="timebar"><div class="timebar-fill" id="timebar-fill"></div></div>
 
             <div class="board-wrap">
                 <div class="board" id="board"></div>
@@ -98,6 +98,7 @@
             <div class="game-actions">
                 <button type="button" class="action-btn" id="hint-btn">힌트 3</button>
                 <button type="button" class="action-btn" id="give-up-btn">그만두기</button>
+                <button type="button" class="action-btn icon-btn" id="sound-btn" aria-label="소리 켜기/끄기">🔊</button>
             </div>
         </main>
 
@@ -128,6 +129,7 @@
         </footer>
     </div>
 
+    <div class="vignette" id="vignette" aria-hidden="true"></div>
     <div class="toast" id="toast" role="status"></div>
     <script src="words.js"></script>
     <script src="jamo.js"></script>
