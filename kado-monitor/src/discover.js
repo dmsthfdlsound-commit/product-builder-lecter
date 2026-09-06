@@ -45,10 +45,28 @@ export function suggestConfig(ranked) {
   const list = ranked.find((r) => r.reasons.some((x) => x.startsWith('목록')));
   const detail = ranked.find((r) => r.reasons.some((x) => x.startsWith('prize 배열')) && r !== list);
   const cfg = { source: 'kado', listUrl: list?.url ?? 'TODO', intervalSec: 30 };
-  if (detail) cfg.detailUrl = detail.url.replace(/\d{2,}/, '{id}');
+  if (detail) cfg.detailUrl = templateDetailUrl(detail.url, list?.sampleIds ?? []);
   if (list?.sampleKeys) cfg._listItemKeys = list.sampleKeys;
   if (detail?.prizeKeys) cfg._prizeKeys = detail.prizeKeys;
   return cfg;
+}
+
+/** 상세 URL 의 경로에서 팩 id 에 해당하는 조각을 {id} 로 치환 (호스트/포트는 건드리지 않음) */
+export function templateDetailUrl(url, sampleIds = []) {
+  let u;
+  try { u = new URL(url); } catch { return url; }
+  const ids = sampleIds.map(String).filter(Boolean);
+  let inQuery = false;
+  for (const [k, v] of [...u.searchParams]) if (ids.includes(v)) { u.searchParams.set(k, '{id}'); inQuery = true; }
+  if (inQuery) return u.toString().replace(/%7Bid%7D/g, '{id}');
+  const segs = u.pathname.split('/');
+  let idx = -1;
+  for (let i = segs.length - 1; i >= 0 && idx < 0; i--) if (ids.includes(decodeURIComponent(segs[i]))) idx = i;
+  if (idx < 0) for (let i = segs.length - 1; i >= 0 && idx < 0; i--) if (/^\d+$/.test(segs[i]) || /^[\w-]*\d[\w-]*$/.test(segs[i])) idx = i;
+  if (idx < 0) idx = segs.length - 1;
+  segs[idx] = '{id}';
+  u.pathname = segs.join('/');
+  return u.toString().replace(/%7Bid%7D/g, '{id}');
 }
 
 export async function runDiscover({ url = 'https://kado.trade/', headed = false, outDir = 'discover-out', waitMs = 20000, storageState } = {}) {
@@ -74,7 +92,7 @@ export async function runDiscover({ url = 'https://kado.trade/', headed = false,
       const { score, reasons } = scoreResponse(u, body);
       const list = extractPackList(body);
       const prizes = findPrizeArray(body) ?? (list[0] && findPrizeArray(list[0]));
-      captured.push({ idx, url: u, file, score, reasons, sampleKeys: list[0] ? Object.keys(list[0]) : null, prizeKeys: prizes?.[0] ? Object.keys(prizes[0]) : null });
+      captured.push({ idx, url: u, file, score, reasons, sampleKeys: list[0] ? Object.keys(list[0]) : null, sampleIds: list.slice(0, 50).map((it) => findKey(it, 'id')).filter((v) => v != null), prizeKeys: prizes?.[0] ? Object.keys(prizes[0]) : null });
       if (score >= 5) console.log(`[후보 ${score}] ${u}  (${reasons.join(', ')})`);
     } catch { /* non-json */ }
   });
