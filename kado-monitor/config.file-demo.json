@@ -1,0 +1,11 @@
+{
+  "adapter": { "source": "file", "path": "fixtures/sample-packs.json", "limitedFilter": false },
+  "analysis": { "feeRate": 0.1, "haircut": 0.9, "monteCarloTrials": 2000 },
+  "rules": { "roiAbove": 0, "buyoutRoiAbove": 0.1, "roiJump": 0.05 },
+  "intervalSec": 5,
+  "alertCooldownSec": 60,
+  "stateDir": "state",
+  "resume": false,
+  "port": 8787,
+  "notify": []
+}

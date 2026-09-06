@@ -1,0 +1,127 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>KADO 리미티드 팩 감시</title>
+<style>
+  :root { --bg:#0f1318; --card:#161c24; --line:#243040; --fg:#e6edf3; --muted:#8b98a8; --good:#3ddc84; --bad:#ff6b6b; --warn:#f5c542; --acc:#5aa9ff; }
+  * { box-sizing:border-box }
+  body { margin:0; background:var(--bg); color:var(--fg); font:14px/1.5 Pretendard,"Apple SD Gothic Neo","Noto Sans KR",system-ui,sans-serif; }
+  header { display:flex; align-items:center; gap:16px; padding:14px 20px; border-bottom:1px solid var(--line); position:sticky; top:0; background:var(--bg); z-index:2 }
+  header h1 { font-size:18px; margin:0 }
+  .status { color:var(--muted); font-size:12px } .status b { color:var(--fg) }
+  .dot { display:inline-block; width:8px; height:8px; border-radius:50%; background:var(--bad); margin-inline-end:6px } .dot.on { background:var(--good) }
+  main { display:grid; grid-template-columns: minmax(0,1fr) 320px; gap:16px; padding:16px 20px }
+  @media (max-width:900px){ main { grid-template-columns:1fr } }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:14px }
+  table { width:100%; border-collapse:collapse; font-variant-numeric:tabular-nums }
+  th,td { padding:8px 6px; border-bottom:1px solid var(--line); text-align:right; white-space:nowrap }
+  th:first-child,td:first-child { text-align:left }
+  th { color:var(--muted); font-weight:600; font-size:12px; cursor:pointer; user-select:none }
+  tr.pack { cursor:pointer } tr.pack:hover { background:#1c2531 }
+  tr.gone { opacity:.45 }
+  .pos { color:var(--good); font-weight:700 } .neg { color:var(--bad) } .mid { color:var(--warn) }
+  .spark { width:90px; height:22px; vertical-align:middle }
+  .detail { display:none; background:#111820 } .detail.open { display:table-row } .detail td { text-align:left; white-space:normal; padding:12px }
+  .detail table { font-size:12px } .detail th, .detail td { padding:4px 6px }
+  .grid2 { display:grid; grid-template-columns:1fr 1fr; gap:12px } @media (max-width:700px){ .grid2 { grid-template-columns:1fr } }
+  .alerts { max-height:70vh; overflow:auto } .alert { padding:8px 0; border-bottom:1px solid var(--line); font-size:13px }
+  .alert .t { color:var(--muted); font-size:11px } .alert.alert-level { border-inline-start:3px solid var(--good); padding-inline-start:8px }
+  .toolbar { display:flex; gap:10px; align-items:center; margin-bottom:10px; flex-wrap:wrap; color:var(--muted); font-size:12px }
+  input[type=number] { width:70px; background:#0f1318; color:var(--fg); border:1px solid var(--line); border-radius:6px; padding:4px 6px }
+  .badge { display:inline-block; padding:1px 6px; border-radius:6px; font-size:11px; background:#243040; color:var(--muted); margin-inline-start:6px }
+  .bar { height:6px; background:#243040; border-radius:3px; overflow:hidden } .bar i { display:block; height:100%; background:var(--acc) }
+</style>
+</head>
+<body>
+<header>
+  <h1>KADO 리미티드 팩 감시</h1>
+  <span class="status"><span class="dot" id="dot"></span><span id="conn">연결 중…</span> · 마지막 조회 <b id="last">-</b> · 사이클 <b id="cycles">0</b> · 오류 <b id="errors">0</b></span>
+  <span class="status" id="lastError"></span>
+</header>
+<main>
+  <section class="card">
+    <div class="toolbar">
+      <label><input type="checkbox" id="onlyPos"> +EV 만 보기</label>
+      <label>ROI 하이라이트 ≥ <input type="number" id="hl" value="0" step="5">%</label>
+      <label><input type="checkbox" id="showGone"> 종료된 팩 표시</label>
+      <span>정렬: 헤더 클릭</span>
+    </div>
+    <table id="tbl">
+      <thead><tr>
+        <th data-k="name">팩</th><th data-k="price">가격</th><th data-k="remaining">잔여</th><th data-k="evNet">순EV</th>
+        <th data-k="roi">ROI</th><th data-k="profitProb1">이득확률</th><th data-k="buyoutRoi">싹쓸이ROI</th><th data-k="top">최고가(잔여)</th><th>추세</th>
+      </tr></thead>
+      <tbody id="rows"></tbody>
+    </table>
+  </section>
+  <aside class="card">
+    <h3 style="margin:0 0 8px">알림</h3>
+    <div class="alerts" id="alerts"></div>
+  </aside>
+</main>
+<script>
+const $ = (s) => document.querySelector(s);
+const fmt = (n) => Math.round(n).toLocaleString('ko-KR');
+const pct = (x) => (x == null ? '-' : (x * 100).toFixed(1) + '%');
+const cls = (x, hl) => (x == null ? '' : x >= hl ? 'pos' : x >= hl - 0.15 ? 'mid' : 'neg');
+let state = { packs: [], alerts: [] }, sortKey = 'roi', sortDir = -1, open = new Set();
+
+function spark(hist) {
+  if (!hist || hist.length < 2) return '';
+  const w = 90, h = 22, xs = hist.map((p) => p.roi);
+  const mn = Math.min(...xs), mx = Math.max(...xs), rg = mx - mn || 1;
+  const pts = xs.map((v, i) => `${(i / (xs.length - 1)) * w},${h - 2 - ((v - mn) / rg) * (h - 4)}`).join(' ');
+  const zero = mn < 0 && mx > 0 ? `<line x1="0" x2="${w}" y1="${h - 2 - ((0 - mn) / rg) * (h - 4)}" y2="${h - 2 - ((0 - mn) / rg) * (h - 4)}" stroke="#3a4a5e" stroke-dasharray="2 2"/>` : '';
+  return `<svg class="spark" viewBox="0 0 ${w} ${h}">${zero}<polyline fill="none" stroke="${xs.at(-1) >= 0 ? '#3ddc84' : '#5aa9ff'}" stroke-width="1.5" points="${pts}"/></svg>`;
+}
+
+function detailHtml(p) {
+  const prizes = p.prizes.map((z) => `<tr><td>${esc(z.name)}${z.tier ? `<span class="badge">${esc(z.tier)}</span>` : ''}</td><td>${fmt(z.value)}</td><td>${z.remaining}/${z.total ?? '?'}</td><td>${pct(z.prob)}</td><td>${fmt(z.evShare)}</td><td>${z.profitable ? '★' : ''}</td></tr>`).join('');
+  const k = p.kCurve.map((c) => `<tr><td>${c.k}</td><td>${fmt(c.cost)}</td><td>${fmt(c.ev)}</td><td>${pct(c.hitProfitCard)}</td><td>${pct(c.hitTop)}</td><td>${pct(c.profitProb)}</td><td>${c.p50 == null ? '-' : fmt(c.p50)}</td></tr>`).join('');
+  return `<div class="grid2">
+    <div><b>잔여 카드</b> <span class="badge">시세 커버리지 ${pct(p.valueCoverage)}</span>
+      <table><thead><tr><th style="text-align:left">카드</th><th>시세</th><th>잔여</th><th>확률</th><th>EV기여</th><th>이득</th></tr></thead><tbody>${prizes}</tbody></table></div>
+    <div><b>k회 뽑기</b> ${p.bestK ? `<span class="badge">권장 ${p.bestK}회</span>` : ''} ${p.url ? `<a href="${esc(p.url)}" target="_blank" rel="noopener" style="color:var(--acc);margin-inline-start:8px">팩 열기 ↗</a>` : ''}
+      <table><thead><tr><th>k</th><th>비용</th><th>기대가치</th><th>이득카드≥1</th><th>최고가≥1</th><th>손익분기P</th><th>중앙값</th></tr></thead><tbody>${k}</tbody></table></div>
+  </div>`;
+}
+const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+
+function render() {
+  const hl = Number($('#hl').value) / 100;
+  const onlyPos = $('#onlyPos').checked, showGone = $('#showGone').checked;
+  const packs = state.packs.filter((p) => (showGone || !p.gone) && (!onlyPos || p.roi >= 0));
+  const val = (p) => (sortKey === 'top' ? (p.topPrize?.value ?? 0) : sortKey === 'name' ? p.name : (p[sortKey] ?? -Infinity));
+  packs.sort((a, b) => (val(a) > val(b) ? 1 : val(a) < val(b) ? -1 : 0) * sortDir);
+  $('#rows').innerHTML = packs.map((p) => `
+    <tr class="pack ${p.gone ? 'gone' : ''}" data-id="${esc(p.id)}">
+      <td>${esc(p.name)}${p.soldOut ? '<span class="badge">품절</span>' : ''}${p.gone ? '<span class="badge">종료</span>' : ''}
+        <div class="bar" title="소진율"><i style="width:${p.totalInitial ? (100 - (p.remaining / p.totalInitial) * 100).toFixed(0) : 0}%"></i></div></td>
+      <td>${fmt(p.price)}</td><td>${p.remaining}/${p.totalInitial || '?'}</td><td>${fmt(p.evNet)}</td>
+      <td class="${cls(p.roi, hl)}">${pct(p.roi)}</td><td>${pct(p.profitProb1)}</td>
+      <td class="${cls(p.buyoutRoi, hl)}">${pct(p.buyoutRoi)}</td>
+      <td>${p.topPrize ? `${fmt(p.topPrize.value)} (${p.topPrize.remaining})` : '-'}</td><td>${spark(p.history)}</td>
+    </tr>
+    <tr class="detail ${open.has(p.id) ? 'open' : ''}"><td colspan="9">${open.has(p.id) ? detailHtml(p) : ''}</td></tr>`).join('');
+  $('#alerts').innerHTML = state.alerts.map((a) => `<div class="alert ${a.level === 'alert' ? 'alert-level' : ''}"><div class="t">${new Date(a.at).toLocaleTimeString('ko-KR')} · ${esc(a.name)}</div>${a.triggers.map((t) => esc(t.msg)).join('<br>')}</div>`).join('') || '<span class="status">아직 알림 없음</span>';
+  $('#last').textContent = state.lastCycle ? new Date(state.lastCycle).toLocaleTimeString('ko-KR') : '-';
+  $('#cycles').textContent = state.cycles ?? 0; $('#errors').textContent = state.errors ?? 0;
+  $('#lastError').textContent = state.lastError ? `마지막 오류: ${state.lastError.msg}` : '';
+}
+$('#rows').addEventListener('click', (e) => { const tr = e.target.closest('tr.pack'); if (!tr) return; const id = tr.dataset.id; open.has(id) ? open.delete(id) : open.add(id); render(); });
+document.querySelectorAll('th[data-k]').forEach((th) => th.addEventListener('click', () => { const k = th.dataset.k; if (sortKey === k) sortDir *= -1; else { sortKey = k; sortDir = k === 'name' ? 1 : -1; } render(); }));
+['#onlyPos', '#hl', '#showGone'].forEach((s) => $(s).addEventListener('input', render));
+
+function connect() {
+  const es = new EventSource('/events');
+  es.onopen = () => { $('#dot').classList.add('on'); $('#conn').textContent = '실시간'; };
+  es.onmessage = (m) => { state = JSON.parse(m.data); render(); if (state.alerts[0] && Notification.permission === 'granted' && Date.now() - state.alerts[0].at < 5000) new Notification(state.alerts[0].name, { body: state.alerts[0].triggers.map((t) => t.msg).join('\n') }); };
+  es.onerror = () => { $('#dot').classList.remove('on'); $('#conn').textContent = '재연결 중…'; es.close(); setTimeout(connect, 3000); };
+}
+if ('Notification' in window && Notification.permission === 'default') Notification.requestPermission();
+fetch('/api/state').then((r) => r.json()).then((s) => { state = s; render(); }).finally(connect);
+</script>
+</body>
+</html>

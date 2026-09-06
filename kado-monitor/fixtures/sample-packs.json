@@ -1,0 +1,42 @@
+{
+  "data": {
+    "items": [
+      {
+        "id": "lp-1001",
+        "name": "[리미티드] 포켓몬 151 SAR 팩 #12",
+        "type": "LIMITED",
+        "price": 5000,
+        "url": "https://kado.trade/packs/lp-1001",
+        "prizes": [
+          { "cardName": "리자몽 ex SAR", "marketPrice": 180000, "remainCount": 1, "totalCount": 1, "rarity": "S" },
+          { "cardName": "뮤 ex SAR", "marketPrice": 65000, "remainCount": 2, "totalCount": 2, "rarity": "A" },
+          { "cardName": "이상해꽃 ex SAR", "marketPrice": 32000, "remainCount": 1, "totalCount": 2, "rarity": "A" },
+          { "cardName": "피카츄 AR", "marketPrice": 9000, "remainCount": 3, "totalCount": 6, "rarity": "B" },
+          { "cardName": "AR 랜덤", "marketPrice": 3500, "remainCount": 8, "totalCount": 20, "rarity": "C" },
+          { "cardName": "RR 랜덤", "marketPrice": 1200, "remainCount": 10, "totalCount": 40, "rarity": "D" },
+          { "cardName": "꽝(커먼 3장)", "marketPrice": 300, "remainCount": 15, "totalCount": 80, "rarity": "E" }
+        ],
+        "lastOne": { "name": "라스트원: 피카츄 프로모", "marketPrice": 25000 }
+      },
+      {
+        "id": "lp-1002",
+        "name": "[리미티드] 원피스 OP-09 리더 팩",
+        "type": "LIMITED",
+        "price": 3000,
+        "prizes": [
+          { "cardName": "샹크스 리더 패러렐", "marketPrice": 120000, "remainCount": 0, "totalCount": 1 },
+          { "cardName": "루피 SEC", "marketPrice": 40000, "remainCount": 1, "totalCount": 1 },
+          { "cardName": "SR 랜덤", "marketPrice": 2500, "remainCount": 20, "totalCount": 30 },
+          { "cardName": "R 랜덤", "marketPrice": 500, "remainCount": 60, "totalCount": 100 }
+        ]
+      },
+      {
+        "id": "np-2001",
+        "name": "일반 부스터 팩",
+        "type": "NORMAL",
+        "price": 1000,
+        "prizes": [ { "cardName": "랜덤", "marketPrice": 700, "remainCount": 999, "totalCount": 999 } ]
+      }
+    ]
+  }
+}

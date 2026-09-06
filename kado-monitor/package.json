@@ -1,0 +1,18 @@
+{
+  "name": "kado-limited-pack-monitor",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "kado.trade 리미티드 팩 기대값(EV) 분석 및 실시간 감시",
+  "bin": { "kado-monitor": "bin/kado-monitor.js" },
+  "scripts": {
+    "test": "node --test \"test/**/*.test.js\"",
+    "analyze": "node bin/kado-monitor.js analyze fixtures/sample-packs.json",
+    "scan": "node bin/kado-monitor.js scan",
+    "watch": "node bin/kado-monitor.js watch",
+    "discover": "node bin/kado-monitor.js discover --headed"
+  },
+  "engines": { "node": ">=20" },
+  "devDependencies": {},
+  "optionalDependencies": {}
+}
