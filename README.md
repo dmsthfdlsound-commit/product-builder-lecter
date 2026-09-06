@@ -21,3 +21,7 @@ npx serve .
 ## 배포 & 수익화
 
 [`LAUNCH_PLAN.md`](./LAUNCH_PLAN.md)에 7일 런칭·수익화 실행 플랜이 정리되어 있습니다.
+
+## 부속 도구: KADO 리미티드 팩 감시기
+
+[`kado-monitor/`](./kado-monitor/README.md) 에 kado.trade 리미티드 팩의 잔여 풀 기대값(EV)을 계산하고 +EV 진입 시점을 실시간 감시·알림하는 Node.js 도구가 있습니다. 정적 사이트 배포에는 포함되지 않습니다.

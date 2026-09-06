@@ -1,0 +1,46 @@
+{
+  "_comment": "복사해서 config.json 으로 저장. listUrl/detailUrl 은 `discover` 결과로 채운다. 값을 모르면 map 은 비워두고 자동 추론에 맡긴다.",
+  "adapter": {
+    "source": "kado",
+    "baseUrl": "https://kado.trade",
+    "listUrl": "TODO: 예) /api/packs?type=limited",
+    "detailUrl": "TODO: 예) /api/packs/{id}",
+    "listPath": null,
+    "detailPath": null,
+    "limitedFilter": "limit|리미티드|한정",
+    "headers": {
+      "_comment": "로그인이 필요하면 브라우저 개발자도구 → Network → 요청 헤더의 cookie / authorization 을 복사",
+      "cookie": ""
+    },
+    "map": {
+      "_comment": "자동 추론이 틀릴 때만 지정. 점(.) 경로. 예: \"price\": \"sale.price\", \"prizes\": \"detail.cards\", \"prize\": { \"value\": \"card.marketPrice\" }"
+    },
+    "valueMultiplier": 1,
+    "valueOverrides": { "_comment": "카드명 → 시세(원). 사이트가 시세를 안 주는 카드 보정용" }
+  },
+  "analysis": {
+    "feeRate": 0.1,
+    "haircut": 0.9,
+    "profitThreshold": 1,
+    "monteCarloTrials": 2000,
+    "maxK": 30
+  },
+  "rules": {
+    "roiAbove": 0,
+    "buyoutRoiAbove": 0.1,
+    "topProbAbove": null,
+    "profitProbAbove": null,
+    "remainingBelow": null,
+    "roiJump": 0.05,
+    "minValueCoverage": 0.8
+  },
+  "intervalSec": 30,
+  "jitter": 0.15,
+  "alertCooldownSec": 600,
+  "historyLength": 200,
+  "stateDir": "state",
+  "port": 8787,
+  "notify": [
+    { "type": "discord", "url": "https://discord.com/api/webhooks/..." }
+  ]
+}
